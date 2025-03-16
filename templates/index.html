@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <title>Audio Transkription mit Whisper</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .options {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f5f5f5;
+            border-radius: 5px;
+        }
+        .transcription-box {
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+            min-height: 100px;
+        }
+        .model-selector {
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Audio Transkription mit Whisper</h1>
+    
+    <div class="options">
+        <form method="POST" enctype="multipart/form-data">
+            <div class="model-selector">
+                <label for="transcription-method">Transkriptionsmethode:</label>
+                <select name="transcription_method" id="transcription-method">
+                    <option value="local" {% if selected_method == 'local' %}selected{% endif %}>Lokales Whisper Modell</option>
+                    {% if cloud_available %}
+                    <option value="cloud" {% if selected_method == 'cloud' %}selected{% endif %}>OpenAI Cloud API</option>
+                    {% endif %}
+                </select>
+            </div>
+            
+            <div>
+                <input type="file" name="audio_file" accept="audio/*" required>
+                <button type="submit">Transkribiere</button>
+            </div>
+        </form>
+    </div>
+
+    {% if transcription %}
+        <h2>Transkription:</h2>
+        <div class="transcription-box">
+            <p>{{ transcription }}</p>
+        </div>
+    {% endif %}
+</body>
+</html>
