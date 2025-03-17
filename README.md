@@ -14,7 +14,7 @@ A web application for audio transcription using OpenAI's Whisper model. The appl
 ### Prerequisites
 
 - Docker (for Docker method)
-- Python 3.9+ (for local installation)
+- Python 3.9+ and ffmpeg (for local installation)
 
 ### With Docker
 
@@ -37,10 +37,10 @@ docker run -d -p 5000:5000 -e LOCAL_API_KEY=your_api_key whisper-web-app
 docker run -d -p 5000:5000 -e OPENAI_API_KEY=your_openai_key whisper-web-app
 ```
 
-### With Python Virtual Environment
+### With Python Environment
 
 ```bash
-# Create a virtual environment
+# Create a Python environment
 python -m venv venv
 
 # Activate the virtual environment
