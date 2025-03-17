@@ -84,6 +84,8 @@ curl -X POST -H "Authorization: Bearer your_api_key" -F "file=@audio.mp3" -F "mo
 
 Model options: tiny, base, small, medium, large (the larger the model, the more accurate but slower)
 
+Change modell in app.py under "model_size".
+
 ## Environment Variables
 
 - `OPENAI_API_KEY`: API key for OpenAI Cloud (optional)
