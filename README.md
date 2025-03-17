@@ -13,26 +13,50 @@ A web application for audio transcription using OpenAI's Whisper model. The appl
 
 ### Prerequisites
 
-- Docker
+- Docker (for Docker method)
+- Python 3.9+ (for local installation)
 
 ### With Docker
 
 ```bash
-#Downlaod from Github
-git clone https://github.com/Janinnho/whisper-api-stt.git
-cd whisper-api-stt
-
 # Build the Docker image
 docker build -t whisper-web-app .
 
 # Start the container without API key
-docker run -d -p 5000:5000 whisper-web-app
+docker run -p 5000:5000 whisper-web-app
 
 # Start with local API key
-docker run -d -p 5000:5000 -e LOCAL_API_KEY=your_api_key whisper-web-app
+docker run -p 5000:5000 -e LOCAL_API_KEY=your_api_key whisper-web-app
 
 # Start with OpenAI API key for cloud transcription
-docker run -d -p 5000:5000 -e OPENAI_API_KEY=your_openai_key whisper-web-app
+docker run -p 5000:5000 -e OPENAI_API_KEY=your_openai_key whisper-web-app
+```
+
+### With Python Virtual Environment
+
+```bash
+# Create a virtual environment
+python -m venv venv
+
+# Activate the virtual environment
+# On Windows
+venv\Scripts\activate
+# On macOS/Linux
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the Flask application
+# Without API keys
+flask run
+# or
+python app.py
+
+# With API keys
+export LOCAL_API_KEY=your_api_key  # For local API protection
+export OPENAI_API_KEY=your_openai_key  # For OpenAI cloud transcription
+flask run
 ```
 
 ## Usage
