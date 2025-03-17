@@ -9,6 +9,9 @@ ENV PYTHONUNBUFFERED=1
 # OPENAI_API_KEY kann beim Build mit --build-arg OPENAI_API_KEY=your_key übergeben werden
 ARG OPENAI_API_KEY=""
 ENV OPENAI_API_KEY=${OPENAI_API_KEY}
+# LOCAL_API_KEY für API-Endpunkt kann mit --build-arg oder -e LOCAL_API_KEY übergeben werden
+ARG LOCAL_API_KEY=""
+ENV LOCAL_API_KEY=${LOCAL_API_KEY}
 
 # Arbeitsverzeichnis festlegen
 WORKDIR /app

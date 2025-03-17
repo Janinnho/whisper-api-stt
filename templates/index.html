@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>Audio Transkription mit Whisper</title>
+    <title>Audio Transcription with Whisper</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -29,14 +29,14 @@
     </style>
 </head>
 <body>
-    <h1>Audio Transkription mit Whisper</h1>
+    <h1>Audio Transcription with Whisper</h1>
     
     <div class="options">
         <form method="POST" enctype="multipart/form-data">
             <div class="model-selector">
-                <label for="transcription-method">Transkriptionsmethode:</label>
+                <label for="transcription-method">Transcription method:</label>
                 <select name="transcription_method" id="transcription-method">
-                    <option value="local" {% if selected_method == 'local' %}selected{% endif %}>Lokales Whisper Modell</option>
+                    <option value="local" {% if selected_method == 'local' %}selected{% endif %}>Local Whisper Model</option>
                     {% if cloud_available %}
                     <option value="cloud" {% if selected_method == 'cloud' %}selected{% endif %}>OpenAI Cloud API</option>
                     {% endif %}
@@ -45,13 +45,13 @@
             
             <div>
                 <input type="file" name="audio_file" accept="audio/*" required>
-                <button type="submit">Transkribiere</button>
+                <button type="submit">Transcribe</button>
             </div>
         </form>
     </div>
 
     {% if transcription %}
-        <h2>Transkription:</h2>
+        <h2>Transcription:</h2>
         <div class="transcription-box">
             <p>{{ transcription }}</p>
         </div>
