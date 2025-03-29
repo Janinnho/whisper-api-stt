@@ -1,6 +1,6 @@
 FROM python:3.9-slim
 
-# Installiere ffmpeg und andere Abhängigkeiten
+# Install ffmpeg and more
 RUN apt-get update && apt-get install -y ffmpeg
 
 # Setze Umgebungsvariablen
