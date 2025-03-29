@@ -2,59 +2,386 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>Audio Transcription with Whisper</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Whisper Transcription</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
+        :root {
+            --primary-color: #4a6ee0;
+            --primary-light: #e9effd;
+            --secondary-color: #6c757d;
+            --success-color: #28a745;
+            --info-color: #17a2b8;
+            --light-gray: #f8f9fa;
+            --dark-gray: #343a40;
+            --border-radius: 8px;
+            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            --transition: all 0.3s ease;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
         body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f5f7fa;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1000px;
             margin: 0 auto;
             padding: 20px;
         }
-        .options {
-            margin: 20px 0;
-            padding: 15px;
-            background-color: #f5f5f5;
-            border-radius: 5px;
+        
+        header {
+            text-align: center;
+            margin-bottom: 30px;
         }
+        
+        h1 {
+            color: var(--primary-color);
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+        
+        h2 {
+            color: var(--secondary-color);
+            font-size: 1.5rem;
+            margin: 25px 0 15px 0;
+        }
+        
+        .card {
+            background-color: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+            padding: 25px;
+            margin-bottom: 25px;
+            transition: var(--transition);
+        }
+        
+        .card:hover {
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .tab {
+            padding: 12px 20px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 1rem;
+            font-weight: 500;
+            color: var(--secondary-color);
+            transition: var(--transition);
+        }
+        
+        .tab.active {
+            color: var(--primary-color);
+            border-bottom: 3px solid var(--primary-color);
+        }
+        
+        .tab:hover:not(.active) {
+            color: var(--primary-color);
+            background-color: var(--primary-light);
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        
+        select, input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ced4da;
+            border-radius: var(--border-radius);
+            font-size: 1rem;
+            transition: var(--transition);
+        }
+        
+        select:focus, input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 0.2rem rgba(74, 110, 224, 0.25);
+        }
+        
+        .button {
+            display: inline-block;
+            font-weight: 500;
+            color: white;
+            background-color: var(--primary-color);
+            border: none;
+            padding: 12px 20px;
+            font-size: 1rem;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        
+        .button:hover {
+            background-color: #3a5abb;
+            transform: translateY(-2px);
+        }
+        
+        .button.secondary {
+            background-color: var(--secondary-color);
+        }
+        
+        .button.secondary:hover {
+            background-color: #5a6268;
+        }
+        
         .transcription-box {
-            border: 1px solid #ddd;
-            padding: 15px;
-            border-radius: 5px;
-            background-color: #f9f9f9;
-            min-height: 100px;
+            background-color: var(--light-gray);
+            border-radius: var(--border-radius);
+            padding: 20px;
+            min-height: 150px;
+            position: relative;
+            border: 1px solid #dee2e6;
         }
-        .model-selector {
-            margin-bottom: 15px;
+        
+        .copy-button {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: white;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        
+        .copy-button:hover {
+            background-color: var(--primary-light);
+            color: var(--primary-color);
+        }
+        
+        .alert {
+            padding: 15px;
+            border-radius: var(--border-radius);
+            margin-bottom: 20px;
+            color: white;
+        }
+        
+        .alert-success {
+            background-color: var(--success-color);
+        }
+        
+        .spinner {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            
+            h1 {
+                font-size: 2rem;
+            }
+            
+            .card {
+                padding: 15px;
+            }
+            
+            .tab {
+                padding: 10px 15px;
+                font-size: 0.9rem;
+            }
         }
     </style>
 </head>
 <body>
-    <h1>Audio Transcription with Whisper</h1>
-    
-    <div class="options">
-        <form method="POST" enctype="multipart/form-data">
-            <div class="model-selector">
-                <label for="transcription-method">Transcription method:</label>
-                <select name="transcription_method" id="transcription-method">
-                    <option value="local" {% if selected_method == 'local' %}selected{% endif %}>Local Whisper Model</option>
-                    {% if cloud_available %}
-                    <option value="cloud" {% if selected_method == 'cloud' %}selected{% endif %}>OpenAI Cloud API</option>
-                    {% endif %}
-                </select>
+    <div class="container">
+        <header>
+            <h1>Whisper Transcription</h1>
+            <p>Transcribe audio files using OpenAI's Whisper or local models</p>
+        </header>
+        
+        <div class="tabs">
+            <button class="tab active" onclick="openTab(event, 'transcribe-tab')">Transcribe</button>
+            <button class="tab" onclick="openTab(event, 'settings-tab')">API Settings</button>
+        </div>
+        
+        <!-- Transcribe Tab -->
+        <div id="transcribe-tab" class="tab-content active">
+            <div class="card">
+                <form method="POST" enctype="multipart/form-data">
+                    <div class="form-group">
+                        <label for="transcription-method">Transcription Method:</label>
+                        <select name="transcription_method" id="transcription-method" onchange="updateModelOptions()">
+                            <option value="local" {% if selected_method == 'local' %}selected{% endif %}>Local Whisper Model</option>
+                            {% if cloud_available %}
+                            <option value="cloud" {% if selected_method == 'cloud' %}selected{% endif %}>OpenAI Cloud API</option>
+                            {% endif %}
+                        </select>
+                    </div>
+                    
+                    <div class="form-group" id="local-model-group" {% if selected_method == 'cloud' %}style="display:none"{% endif %}>
+                        <label for="local-model-size">Local Model Size:</label>
+                        <select name="local_model_size" id="local-model-size">
+                            <option value="tiny" {% if local_model_size == 'tiny' %}selected{% endif %}>tiny</option>
+                            <option value="base" {% if local_model_size == 'base' or not local_model_size %}selected{% endif %}>base</option>
+                            <option value="small" {% if local_model_size == 'small' %}selected{% endif %}>small</option>
+                            <option value="medium" {% if local_model_size == 'medium' %}selected{% endif %}>medium</option>
+                            <option value="large" {% if local_model_size == 'large' %}selected{% endif %}>large</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group" id="cloud-model-group" {% if selected_method != 'cloud' %}style="display:none"{% endif %}>
+                        <label for="cloud-model">Cloud Model:</label>
+                        <select name="cloud_model" id="cloud-model">
+                            <option value="whisper-1" {% if cloud_model == 'whisper-1' or not cloud_model %}selected{% endif %}>whisper-1</option>
+                            <option value="gpt-4o-transcribe" {% if cloud_model == 'gpt-4o-transcribe' %}selected{% endif %}>gpt-4o-transcribe</option>
+                            <option value="gpt-4o-mini-transcribe" {% if cloud_model == 'gpt-4o-mini-transcribe' %}selected{% endif %}>gpt-4o-mini-transcribe</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="audio-file">Upload Audio File:</label>
+                        <input type="file" name="audio_file" id="audio-file" accept="audio/*" required>
+                    </div>
+                    
+                    <button type="submit" class="button" onclick="showSpinner()">
+                        <i class="fas fa-play"></i> Transcribe
+                    </button>
+                </form>
+                
+                <div id="spinner" class="spinner">
+                    <i class="fas fa-circle-notch fa-spin fa-3x"></i>
+                    <p>Transcribing... This may take a while depending on the file size and model.</p>
+                </div>
             </div>
             
-            <div>
-                <input type="file" name="audio_file" accept="audio/*" required>
-                <button type="submit">Transcribe</button>
+            {% if transcription %}
+            <div class="card">
+                <h2>Transcription Result</h2>
+                <div class="transcription-box">
+                    <button class="copy-button" onclick="copyTranscription()" title="Copy to clipboard">
+                        <i class="fas fa-copy"></i>
+                    </button>
+                    <p id="transcription-text">{{ transcription }}</p>
+                </div>
             </div>
-        </form>
-    </div>
-
-    {% if transcription %}
-        <h2>Transcription:</h2>
-        <div class="transcription-box">
-            <p>{{ transcription }}</p>
+            {% endif %}
         </div>
-    {% endif %}
+        
+        <!-- Settings Tab -->
+        <div id="settings-tab" class="tab-content">
+            <div class="card">
+                <h2>API Settings</h2>
+                <p>Configure which local model to use when receiving API requests with the model="whisper-1" parameter.</p>
+                
+                {% if settings_saved %}
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle"></i> Settings saved successfully!
+                </div>
+                {% endif %}
+                
+                <form method="POST">
+                    <input type="hidden" name="action" value="save_settings">
+                    <input type="hidden" name="transcription_method" value="{{ selected_method }}">
+                    <input type="hidden" name="local_model_size" value="{{ local_model_size }}">
+                    <input type="hidden" name="cloud_model" value="{{ cloud_model }}">
+                    
+                    <div class="form-group">
+                        <label for="api-model">Default API Model:</label>
+                        <select name="api_model" id="api-model">
+                            <option value="tiny" {% if api_model == 'tiny' %}selected{% endif %}>tiny</option>
+                            <option value="base" {% if api_model == 'base' or not api_model %}selected{% endif %}>base</option>
+                            <option value="small" {% if api_model == 'small' %}selected{% endif %}>small</option>
+                            <option value="medium" {% if api_model == 'medium' %}selected{% endif %}>medium</option>
+                            <option value="large" {% if api_model == 'large' %}selected{% endif %}>large</option>
+                        </select>
+                    </div>
+                    
+                    <button type="submit" class="button">
+                        <i class="fas fa-save"></i> Save Settings
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        function updateModelOptions() {
+            const method = document.getElementById('transcription-method').value;
+            const localGroup = document.getElementById('local-model-group');
+            const cloudGroup = document.getElementById('cloud-model-group');
+            
+            if (method === 'local') {
+                localGroup.style.display = 'block';
+                cloudGroup.style.display = 'none';
+            } else {
+                localGroup.style.display = 'none';
+                cloudGroup.style.display = 'block';
+            }
+        }
+        
+        function openTab(evt, tabId) {
+            const tabContents = document.getElementsByClassName('tab-content');
+            for (let i = 0; i < tabContents.length; i++) {
+                tabContents[i].classList.remove('active');
+            }
+            
+            const tabs = document.getElementsByClassName('tab');
+            for (let i = 0; i < tabs.length; i++) {
+                tabs[i].classList.remove('active');
+            }
+            
+            document.getElementById(tabId).classList.add('active');
+            evt.currentTarget.classList.add('active');
+        }
+        
+        function copyTranscription() {
+            const text = document.getElementById('transcription-text').innerText;
+            navigator.clipboard.writeText(text).then(function() {
+                const copyButton = document.querySelector('.copy-button');
+                const originalIcon = copyButton.innerHTML;
+                copyButton.innerHTML = '<i class="fas fa-check"></i>';
+                setTimeout(function() {
+                    copyButton.innerHTML = originalIcon;
+                }, 1500);
+            });
+        }
+        
+        function showSpinner() {
+            const fileInput = document.getElementById('audio-file');
+            if (fileInput.files.length > 0) {
+                document.getElementById('spinner').style.display = 'block';
+            }
+        }
+    </script>
 </body>
 </html>
