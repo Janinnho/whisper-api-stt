@@ -21,6 +21,10 @@ A web application for audio transcription using OpenAI's Whisper model. The appl
 ### With Docker
 
 ```bash
+#Download from Github
+git clone https://github.com/Janinnho/whisper-api-stt.git
+cd whisper-api-stt
+
 # Build the Docker image
 docker build -t whisper-web-app .
 
@@ -37,6 +41,10 @@ docker run -p 5000:5000 -e OPENAI_API_KEY=your_openai_key whisper-web-app
 ### With Python Virtual Environment
 
 ```bash
+#Download from Github
+git clone https://github.com/Janinnho/whisper-api-stt.git
+cd whisper-api-stt
+
 # Create a virtual environment
 python -m venv venv
 
