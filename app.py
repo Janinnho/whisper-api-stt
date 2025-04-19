@@ -1,7 +1,7 @@
 import os
 import tempfile
 import json
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, Response
 import requests
 import whisper
 
@@ -104,6 +104,31 @@ def index():
         api_model=DEFAULT_API_MODEL,
         cloud_available=cloud_available
     )
+    
+@app.route("/transcribe", methods=["POST"])
+def transcribe_ajax():
+    transcription = None
+    transcription_method = request.form.get("transcription_method", "local")
+    local_model_size = request.form.get("local_model_size", "base")
+    cloud_model = request.form.get("cloud_model", "whisper-1")
+
+    if "audio_file" not in request.files:
+        return jsonify({"error": "No file selected!"}), 400
+    file = request.files["audio_file"]
+    if file.filename == "":
+        return jsonify({"error": "No file selected!"}), 400
+
+    try:
+        if transcription_method == "local":
+            transcription = transcribe_with_local_model(file, local_model_size)
+        else:
+            if not OPENAI_API_KEY:
+                return jsonify({"error": "Error: No API key configured for cloud transcription!"}), 400
+            transcription = transcribe_with_openai_api(file, cloud_model)
+    except Exception as e:
+        return jsonify({"error": f"Transcription error: {str(e)}"}), 500
+
+    return jsonify({"transcription": transcription})
 
 # OpenAI API-compatible endpoint for transcriptions
 @app.route("/v1/audio/transcriptions", methods=["POST"])
@@ -129,10 +154,16 @@ def api_transcribe():
         # For direct local model specification (tiny, base, small, medium, large)
         model_size = requested_model
     
+    # Determine desired response format (json or plain text)
+    response_format = request.form.get("response_format", "json").lower()
     try:
         transcription = transcribe_with_local_model(file, model_size)
+        if response_format == "text":
+            return Response(transcription, mimetype="text/plain")
+        # Default to JSON format
         return jsonify({"text": transcription})
     except Exception as e:
+        # Return error in JSON for consistency with OpenAI API
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":

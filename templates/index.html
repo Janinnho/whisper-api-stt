@@ -237,7 +237,7 @@
         <!-- Transcribe Tab -->
         <div id="transcribe-tab" class="tab-content active">
             <div class="card">
-                <form method="POST" enctype="multipart/form-data">
+                <form id="transcription-form" method="POST" enctype="multipart/form-data">
                     <div class="form-group">
                         <label for="transcription-method">Transcription Method:</label>
                         <select name="transcription_method" id="transcription-method" onchange="updateModelOptions()">
@@ -273,17 +273,18 @@
                         <input type="file" name="audio_file" id="audio-file" accept="audio/*" required>
                     </div>
                     
-                    <button type="submit" class="button" onclick="showSpinner()">
+                    <button type="submit" class="button">
                         <i class="fas fa-play"></i> Transcribe
                     </button>
                 </form>
-                
+
                 <div id="spinner" class="spinner">
                     <i class="fas fa-circle-notch fa-spin fa-3x"></i>
                     <p>Transcribing... This may take a while depending on the file size and model.</p>
                 </div>
             </div>
-            
+
+            <noscript>
             {% if transcription %}
             <div class="card">
                 <h2>Transcription Result</h2>
@@ -295,6 +296,8 @@
                 </div>
             </div>
             {% endif %}
+            </noscript>
+            <div id="result-container"></div>
         </div>
         
         <!-- Settings Tab -->
@@ -382,6 +385,47 @@
                 document.getElementById('spinner').style.display = 'block';
             }
         }
+        // AJAX form submission to prevent full page reload
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('transcription-form');
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+                const fileInput = document.getElementById('audio-file');
+                if (fileInput.files.length === 0) {
+                    return;
+                }
+                document.getElementById('spinner').style.display = 'block';
+                const resultContainer = document.getElementById('result-container');
+                resultContainer.innerHTML = '';
+                const formData = new FormData(form);
+                fetch('/transcribe', { method: 'POST', body: formData })
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('spinner').style.display = 'none';
+                    if (data.error) {
+                        alert(data.error);
+                    } else {
+                        const transcription = data.transcription;
+                        const resultHTML = `
+            <div class="card">
+              <h2>Transcription Result</h2>
+              <div class="transcription-box">
+                <button class="copy-button" title="Copy to clipboard"><i class="fas fa-copy"></i></button>
+                <p id="transcription-text"></p>
+              </div>
+            </div>`;
+                        resultContainer.innerHTML = resultHTML;
+                        document.getElementById('transcription-text').innerText = transcription;
+                        const copyButton = resultContainer.querySelector('.copy-button');
+                        copyButton.addEventListener('click', copyTranscription);
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('spinner').style.display = 'none';
+                    alert('Error: ' + error);
+                });
+            });
+        });
     </script>
 </body>
 </html>
