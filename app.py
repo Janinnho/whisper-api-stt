@@ -5,7 +5,10 @@ from flask import Flask, render_template, request, jsonify, Response
 import requests
 import whisper
 
+from flask_cors import CORS
 app = Flask(__name__)
+# Enable CORS for all routes to allow external clients (e.g., Dictate) to communicate with this API
+CORS(app)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 LOCAL_API_KEY = os.getenv("LOCAL_API_KEY", None)  # Optional API key for local API
 DEFAULT_API_MODEL = "base"  # Default model for API requests
