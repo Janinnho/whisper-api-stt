@@ -4,6 +4,8 @@ import json
 from flask import Flask, render_template, request, jsonify, Response
 import requests
 import whisper
+from pydub import AudioSegment
+import io
 
 from flask_cors import CORS
 app = Flask(__name__)
@@ -35,22 +37,125 @@ def transcribe_with_local_model(audio_file, model_size="base"):
         result = model.transcribe(temp_file.name)
     return result["text"]
 
+def get_file_size_mb(file_obj):
+    """Get file size in MB."""
+    file_obj.seek(0, 2)  # Seek to end
+    size_bytes = file_obj.tell()
+    file_obj.seek(0)  # Reset to beginning
+    return size_bytes / (1024 * 1024)
+
+def split_audio_file(file_obj, max_chunk_size_mb=18):  # Keep chunks under 18MB for safety
+    """Split audio file into smaller chunks that stay under the size limit."""
+    # Read the file content
+    file_content = file_obj.read()
+    file_obj.seek(0)  # Reset file pointer
+    
+    # Load audio with pydub
+    audio = AudioSegment.from_file(io.BytesIO(file_content))
+    
+    # Calculate target chunk duration based on the original file size and length
+    total_size_mb = len(file_content) / (1024 * 1024)
+    total_duration_ms = len(audio)
+    
+    # Calculate how many chunks we need to stay under the size limit
+    estimated_chunks_needed = max(1, int(total_size_mb / max_chunk_size_mb) + 1)
+    target_chunk_duration_ms = total_duration_ms // estimated_chunks_needed
+    
+    # Ensure minimum chunk duration of 30 seconds to avoid too many tiny chunks
+    min_chunk_duration_ms = 30 * 1000  # 30 seconds
+    target_chunk_duration_ms = max(target_chunk_duration_ms, min_chunk_duration_ms)
+    
+    chunks = []
+    for i in range(0, len(audio), target_chunk_duration_ms):
+        chunk = audio[i:i + target_chunk_duration_ms]
+        
+        # Skip empty chunks
+        if len(chunk) == 0:
+            continue
+        
+        # Export chunk to bytes
+        chunk_io = io.BytesIO()
+        chunk.export(chunk_io, format="wav")
+        chunk_io.seek(0)
+        
+        # Verify chunk size
+        chunk_size_mb = len(chunk_io.getvalue()) / (1024 * 1024)
+        if chunk_size_mb > max_chunk_size_mb:
+            # If chunk is still too large, split it further
+            chunk_io.close()
+            # Recursively split this chunk with smaller duration
+            smaller_duration = target_chunk_duration_ms // 2
+            sub_chunks = []
+            for j in range(0, len(chunk), smaller_duration):
+                sub_chunk = chunk[j:j + smaller_duration]
+                if len(sub_chunk) > 0:  # Skip empty sub-chunks
+                    sub_chunk_io = io.BytesIO()
+                    sub_chunk.export(sub_chunk_io, format="wav")
+                    sub_chunk_io.seek(0)
+                    sub_chunks.append(sub_chunk_io)
+            chunks.extend(sub_chunks)
+        else:
+            chunks.append(chunk_io)
+    
+    return chunks
+
 def transcribe_with_openai_api(audio_file, model="whisper-1"):
     valid_models = ["whisper-1", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"]
     if model not in valid_models:
         model = "whisper-1"  # Default to whisper-1 if invalid model
-        
-    response = requests.post(
-        "https://api.openai.com/v1/audio/transcriptions",
-        headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-        files={"file": (audio_file.filename, audio_file, audio_file.content_type)},
-        data={"model": model}
-    )
-    if response.status_code == 200:
-        json_response = response.json()
-        return json_response.get("text", "No transcription found.")
+    
+    # Check file size
+    file_size_mb = get_file_size_mb(audio_file)
+    
+    if file_size_mb <= 20:
+        # File is small enough, process normally
+        response = requests.post(
+            "https://api.openai.com/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+            files={"file": (audio_file.filename, audio_file, audio_file.content_type)},
+            data={"model": model}
+        )
+        if response.status_code == 200:
+            json_response = response.json()
+            return json_response.get("text", "No transcription found.")
+        else:
+            return f"Transcription error: {response.status_code} - {response.text}"
     else:
-        return f"Transcription error: {response.status_code} - {response.text}"
+        # File is too large, split it into chunks
+        try:
+            chunks = split_audio_file(audio_file)
+            transcriptions = []
+            
+            for i, chunk in enumerate(chunks):
+                # Create a filename for the chunk
+                chunk_filename = f"{audio_file.filename}_chunk_{i+1}.wav"
+                
+                response = requests.post(
+                    "https://api.openai.com/v1/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                    files={"file": (chunk_filename, chunk, "audio/wav")},
+                    data={"model": model}
+                )
+                
+                if response.status_code == 200:
+                    json_response = response.json()
+                    transcription = json_response.get("text", "")
+                    if transcription:
+                        transcriptions.append(transcription)
+                else:
+                    # Close remaining chunks before returning error
+                    for remaining_chunk in chunks[i:]:
+                        remaining_chunk.close()
+                    return f"Transcription error on chunk {i+1}: {response.status_code} - {response.text}"
+                
+                # Close the chunk to free memory
+                chunk.close()
+            
+            # Merge all transcriptions with proper spacing
+            return " ".join(transcriptions)
+            
+        except Exception as e:
+            return f"Error processing large file: {str(e)}"
 
 @app.route("/", methods=["GET", "POST"])
 def index():
