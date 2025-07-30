@@ -119,7 +119,8 @@ def transcribe_with_openai_api(audio_file, model="whisper-1"):
             json_response = response.json()
             return json_response.get("text", "No transcription found.")
         else:
-            return f"Transcription error: {response.status_code} - {response.text}"
+            # Raise an exception instead of returning error string
+            raise Exception(f"OpenAI API error {response.status_code}: {response.reason}")
     else:
         # File is too large, split it into chunks
         try:
@@ -143,10 +144,10 @@ def transcribe_with_openai_api(audio_file, model="whisper-1"):
                     if transcription:
                         transcriptions.append(transcription)
                 else:
-                    # Close remaining chunks before returning error
+                    # Close remaining chunks before raising error
                     for remaining_chunk in chunks[i:]:
                         remaining_chunk.close()
-                    return f"Transcription error on chunk {i+1}: {response.status_code} - {response.text}"
+                    raise Exception(f"OpenAI API error on chunk {i+1}: {response.status_code}: {response.reason}")
                 
                 # Close the chunk to free memory
                 chunk.close()
@@ -155,7 +156,8 @@ def transcribe_with_openai_api(audio_file, model="whisper-1"):
             return " ".join(transcriptions)
             
         except Exception as e:
-            return f"Error processing large file: {str(e)}"
+            # Re-raise the exception to be handled by the caller
+            raise
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -201,7 +203,7 @@ def index():
                         else:
                             transcription = transcribe_with_openai_api(file, cloud_model)
                 except Exception as e:
-                    transcription = f"Transcription error: {str(e)}"
+                    transcription = f"Transcription failed: {str(e)}"
     
     return render_template(
         "index.html", 
@@ -215,7 +217,6 @@ def index():
     
 @app.route("/transcribe", methods=["POST"])
 def transcribe_ajax():
-    transcription = None
     transcription_method = request.form.get("transcription_method", "local")
     local_model_size = request.form.get("local_model_size", "base")
     cloud_model = request.form.get("cloud_model", "whisper-1")
@@ -231,12 +232,18 @@ def transcribe_ajax():
             transcription = transcribe_with_local_model(file, local_model_size)
         else:
             if not OPENAI_API_KEY:
-                return jsonify({"error": "Error: No API key configured for cloud transcription!"}), 400
+                return jsonify({"error": "No API key configured for cloud transcription!"}), 400
             transcription = transcribe_with_openai_api(file, cloud_model)
+        
+        # Ensure transcription is a valid string
+        if not isinstance(transcription, str):
+            return jsonify({"error": "Invalid transcription result"}), 500
+            
+        return jsonify({"transcription": transcription})
     except Exception as e:
-        return jsonify({"error": f"Transcription error: {str(e)}"}), 500
-
-    return jsonify({"transcription": transcription})
+        # Log the full error for debugging but return a clean error message
+        print(f"Transcription error: {str(e)}")
+        return jsonify({"error": f"Transcription failed: {str(e)}"}), 500
 
 # OpenAI API-compatible endpoint for transcriptions
 @app.route("/v1/audio/transcriptions", methods=["POST"])
