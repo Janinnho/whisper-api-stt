@@ -399,11 +399,21 @@
                 resultContainer.innerHTML = '';
                 const formData = new FormData(form);
                 fetch('/transcribe', { method: 'POST', body: formData })
-                .then(response => response.json())
+                .then(response => {
+                    // Check if the response is actually JSON
+                    const contentType = response.headers.get('content-type');
+                    if (!contentType || !contentType.includes('application/json')) {
+                        // Response is not JSON, likely an HTML error page
+                        return response.text().then(text => {
+                            throw new Error('Server returned non-JSON response. This may indicate a server error.');
+                        });
+                    }
+                    return response.json();
+                })
                 .then(data => {
                     document.getElementById('spinner').style.display = 'none';
                     if (data.error) {
-                        alert(data.error);
+                        alert('Transcription Error: ' + data.error);
                     } else {
                         const transcription = data.transcription;
                         const resultHTML = `
@@ -422,7 +432,7 @@
                 })
                 .catch(error => {
                     document.getElementById('spinner').style.display = 'none';
-                    alert('Error: ' + error);
+                    alert('Transcription Error: ' + error.message);
                 });
             });
         });
