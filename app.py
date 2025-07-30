@@ -107,51 +107,93 @@ def transcribe_with_openai_api(audio_file, model="whisper-1"):
     # Check file size
     file_size_mb = get_file_size_mb(audio_file)
     
+    # Set timeout for API requests (90 seconds to handle large chunks)
+    request_timeout = 90
+    
     if file_size_mb <= 20:
         # File is small enough, process normally
-        response = requests.post(
-            "https://api.openai.com/v1/audio/transcriptions",
-            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-            files={"file": (audio_file.filename, audio_file, audio_file.content_type)},
-            data={"model": model}
-        )
-        if response.status_code == 200:
-            json_response = response.json()
-            return json_response.get("text", "No transcription found.")
-        else:
-            # Raise an exception instead of returning error string
-            raise Exception(f"OpenAI API error {response.status_code}: {response.reason}")
+        try:
+            response = requests.post(
+                "https://api.openai.com/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                files={"file": (audio_file.filename, audio_file, audio_file.content_type)},
+                data={"model": model},
+                timeout=request_timeout
+            )
+            if response.status_code == 200:
+                json_response = response.json()
+                return json_response.get("text", "No transcription found.")
+            else:
+                # Raise an exception instead of returning error string
+                raise Exception(f"OpenAI API error {response.status_code}: {response.reason}")
+        except requests.exceptions.Timeout:
+            raise Exception("OpenAI API request timed out. Please try again or use a smaller file.")
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"Network error during transcription: {str(e)}")
     else:
         # File is too large, split it into chunks
         try:
             chunks = split_audio_file(audio_file)
             transcriptions = []
+            total_chunks = len(chunks)
+            
+            print(f"Processing {total_chunks} chunks for large file: {audio_file.filename}")
             
             for i, chunk in enumerate(chunks):
                 # Create a filename for the chunk
                 chunk_filename = f"{audio_file.filename}_chunk_{i+1}.wav"
                 
-                response = requests.post(
-                    "https://api.openai.com/v1/audio/transcriptions",
-                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                    files={"file": (chunk_filename, chunk, "audio/wav")},
-                    data={"model": model}
-                )
+                print(f"Processing chunk {i+1}/{total_chunks}")
                 
-                if response.status_code == 200:
-                    json_response = response.json()
-                    transcription = json_response.get("text", "")
-                    if transcription:
-                        transcriptions.append(transcription)
-                else:
-                    # Close remaining chunks before raising error
-                    for remaining_chunk in chunks[i:]:
-                        remaining_chunk.close()
-                    raise Exception(f"OpenAI API error on chunk {i+1}: {response.status_code}: {response.reason}")
+                max_retries = 3
+                retry_count = 0
+                
+                while retry_count < max_retries:
+                    try:
+                        response = requests.post(
+                            "https://api.openai.com/v1/audio/transcriptions",
+                            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                            files={"file": (chunk_filename, chunk, "audio/wav")},
+                            data={"model": model},
+                            timeout=request_timeout
+                        )
+                        
+                        if response.status_code == 200:
+                            json_response = response.json()
+                            transcription = json_response.get("text", "")
+                            if transcription:
+                                transcriptions.append(transcription)
+                            print(f"Successfully processed chunk {i+1}/{total_chunks}")
+                            break  # Success, break out of retry loop
+                        else:
+                            raise Exception(f"OpenAI API error on chunk {i+1}: {response.status_code}: {response.reason}")
+                            
+                    except requests.exceptions.Timeout:
+                        retry_count += 1
+                        if retry_count < max_retries:
+                            print(f"Timeout on chunk {i+1}, retrying ({retry_count}/{max_retries})...")
+                            continue
+                        else:
+                            # Close remaining chunks before raising error
+                            for remaining_chunk in chunks[i:]:
+                                remaining_chunk.close()
+                            raise Exception(f"Chunk {i+1} failed after {max_retries} timeout retries")
+                            
+                    except requests.exceptions.RequestException as e:
+                        retry_count += 1
+                        if retry_count < max_retries:
+                            print(f"Network error on chunk {i+1}, retrying ({retry_count}/{max_retries})...")
+                            continue
+                        else:
+                            # Close remaining chunks before raising error
+                            for remaining_chunk in chunks[i:]:
+                                remaining_chunk.close()
+                            raise Exception(f"Network error on chunk {i+1} after {max_retries} retries: {str(e)}")
                 
                 # Close the chunk to free memory
                 chunk.close()
             
+            print(f"Successfully processed all {total_chunks} chunks")
             # Merge all transcriptions with proper spacing
             return " ".join(transcriptions)
             
@@ -233,17 +275,33 @@ def transcribe_ajax():
         else:
             if not OPENAI_API_KEY:
                 return jsonify({"error": "No API key configured for cloud transcription!"}), 400
+            
+            # Log file size for debugging
+            file_size_mb = get_file_size_mb(file)
+            print(f"Processing {transcription_method} transcription for file: {file.filename} ({file_size_mb:.2f} MB)")
+            
             transcription = transcribe_with_openai_api(file, cloud_model)
         
         # Ensure transcription is a valid string
         if not isinstance(transcription, str):
             return jsonify({"error": "Invalid transcription result"}), 500
             
+        print(f"Transcription completed successfully for {file.filename}")
         return jsonify({"transcription": transcription})
     except Exception as e:
         # Log the full error for debugging but return a clean error message
-        print(f"Transcription error: {str(e)}")
-        return jsonify({"error": f"Transcription failed: {str(e)}"}), 500
+        error_msg = str(e)
+        print(f"Transcription error for {file.filename}: {error_msg}")
+        
+        # Provide more specific error messages for common issues
+        if "timeout" in error_msg.lower():
+            return jsonify({"error": "Transcription timed out. Large files may take several minutes to process. Please try again or use a smaller file."}), 500
+        elif "network error" in error_msg.lower():
+            return jsonify({"error": "Network error during transcription. Please check your internet connection and try again."}), 500
+        elif "openai api error" in error_msg.lower():
+            return jsonify({"error": f"OpenAI API error: {error_msg}"}), 500
+        else:
+            return jsonify({"error": f"Transcription failed: {error_msg}"}), 500
 
 # OpenAI API-compatible endpoint for transcriptions
 @app.route("/v1/audio/transcriptions", methods=["POST"])

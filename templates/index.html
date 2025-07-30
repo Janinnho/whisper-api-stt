@@ -394,18 +394,45 @@
                 if (fileInput.files.length === 0) {
                     return;
                 }
+                
+                // Check file size and show appropriate message
+                const file = fileInput.files[0];
+                const fileSizeMB = file.size / (1024 * 1024);
+                
                 document.getElementById('spinner').style.display = 'block';
                 const resultContainer = document.getElementById('result-container');
                 resultContainer.innerHTML = '';
+                
+                // Show progress message for large files
+                if (fileSizeMB > 20) {
+                    resultContainer.innerHTML = `
+                        <div class="card">
+                            <h2>Processing Large File</h2>
+                            <p><i class="fas fa-info-circle"></i> File size: ${fileSizeMB.toFixed(2)} MB</p>
+                            <p>Large files are automatically split into chunks for processing. This may take several minutes.</p>
+                            <p>Please be patient and do not refresh the page.</p>
+                        </div>`;
+                }
+                
                 const formData = new FormData(form);
-                fetch('/transcribe', { method: 'POST', body: formData })
+                
+                // Increase timeout for large files (10 minutes)
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minutes
+                
+                fetch('/transcribe', { 
+                    method: 'POST', 
+                    body: formData,
+                    signal: controller.signal
+                })
                 .then(response => {
+                    clearTimeout(timeoutId);
                     // Check if the response is actually JSON
                     const contentType = response.headers.get('content-type');
                     if (!contentType || !contentType.includes('application/json')) {
                         // Response is not JSON, likely an HTML error page
                         return response.text().then(text => {
-                            throw new Error('Server returned non-JSON response. This may indicate a server error.');
+                            throw new Error('Server returned non-JSON response. This may indicate a server error or timeout.');
                         });
                     }
                     return response.json();
@@ -414,6 +441,7 @@
                     document.getElementById('spinner').style.display = 'none';
                     if (data.error) {
                         alert('Transcription Error: ' + data.error);
+                        resultContainer.innerHTML = '';
                     } else {
                         const transcription = data.transcription;
                         const resultHTML = `
@@ -431,8 +459,15 @@
                     }
                 })
                 .catch(error => {
+                    clearTimeout(timeoutId);
                     document.getElementById('spinner').style.display = 'none';
-                    alert('Transcription Error: ' + error.message);
+                    
+                    if (error.name === 'AbortError') {
+                        alert('Transcription Error: Request timed out after 10 minutes. Please try a smaller file or try again later.');
+                    } else {
+                        alert('Transcription Error: ' + error.message);
+                    }
+                    resultContainer.innerHTML = '';
                 });
             });
         });
