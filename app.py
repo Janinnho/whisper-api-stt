@@ -1,9 +1,18 @@
 import os
 import tempfile
 import json
+import subprocess
+import mimetypes
+from typing import List, Callable, Optional
+import threading
+import uuid
+import shutil
+import time
 from flask import Flask, render_template, request, jsonify, Response
 import requests
 import whisper
+from urllib.parse import urlparse
+import yt_dlp
 
 from flask_cors import CORS
 app = Flask(__name__)
@@ -13,12 +22,22 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 LOCAL_API_KEY = os.getenv("LOCAL_API_KEY", None)  # Optional API key for local API
 DEFAULT_API_MODEL = "base"  # Default model for API requests
 
+# Cloud Upload Limits / Chunking Settings
+# Threshold in MB after which we split before sending to OpenAI API
+MAX_CLOUD_FILE_MB = float(os.getenv("MAX_CLOUD_FILE_MB", "20"))
+# Duration per chunk in seconds when splitting (kept small to stay well below size limits)
+CHUNK_DURATION_SECONDS = int(os.getenv("CHUNK_DURATION_SECONDS", "600"))  # 10 minutes
+# Re-encode audio when chunking to ensure predictable small chunk sizes
+REENCODE_BITRATE = os.getenv("REENCODE_BITRATE", "64k")  # audio bitrate
+
 if not OPENAI_API_KEY:
     print("Note: No OPENAI_API_KEY found. Cloud transcription will not be available.")
 
 # Load local Whisper model (will be downloaded on first call)
 local_model = None
 current_model_size = None
+JOBS_LOCK = threading.Lock()
+JOBS = {}
 
 def load_local_model(model_size="base"):
     global local_model, current_model_size
@@ -28,29 +47,352 @@ def load_local_model(model_size="base"):
         current_model_size = model_size
     return local_model
 
-def transcribe_with_local_model(audio_file, model_size="base"):
-    model = load_local_model(model_size)
+def transcribe_with_local_model(audio_file, model_size="base", progress: Optional[Callable[[str, int], None]] = None, return_segments: bool = False):
+    # Wrapper für FileStorage -> Pfad
     with tempfile.NamedTemporaryFile(delete=True) as temp_file:
         audio_file.save(temp_file.name)
-        result = model.transcribe(temp_file.name)
-    return result["text"]
+        return transcribe_local_from_path(temp_file.name, model_size, progress, return_segments)
 
-def transcribe_with_openai_api(audio_file, model="whisper-1"):
+
+def transcribe_local_from_path(file_path: str, model_size="base", progress: Optional[Callable[[str, int], None]] = None, return_segments: bool = False):
+    if progress:
+        progress("Lade lokales Whisper-Modell", 5)
+    model = load_local_model(model_size)
+    if progress:
+        progress("Transkribiere lokal…", 10)
+    result = model.transcribe(file_path)
+    if progress:
+        progress("Fertig", 100)
+    text = result.get("text", "")
+    if not return_segments:
+        return text
+    segments = [
+        {"start": float(s.get("start", 0.0)), "end": float(s.get("end", 0.0)), "text": s.get("text", "")}
+        for s in (result.get("segments") or [])
+    ]
+    return {"text": text, "segments": segments}
+
+def transcribe_with_openai_api(audio_file, model="whisper-1", progress: Optional[Callable[[str, int], None]] = None, return_segments: bool = False):
     valid_models = ["whisper-1", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"]
     if model not in valid_models:
         model = "whisper-1"  # Default to whisper-1 if invalid model
-        
-    response = requests.post(
-        "https://api.openai.com/v1/audio/transcriptions",
-        headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-        files={"file": (audio_file.filename, audio_file, audio_file.content_type)},
-        data={"model": model}
+    # Save uploaded file and delegate to path-based function
+    with tempfile.NamedTemporaryDirectory() as tmpdir:
+        orig_ext = os.path.splitext(audio_file.filename or "")[1] or ".bin"
+        input_path = os.path.join(tmpdir, f"input{orig_ext}")
+        audio_file.save(input_path)
+        return transcribe_with_openai_api_path(input_path, model, progress, return_segments)
+
+
+def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress: Optional[Callable[[str, int], None]] = None, return_segments: bool = False):
+    valid_models = ["whisper-1", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"]
+    if model not in valid_models:
+        model = "whisper-1"
+
+    file_size_bytes = os.path.getsize(input_path)
+    size_mb = file_size_bytes / (1024 * 1024)
+
+    def _send_to_openai(file_path: str, override_content_type: str = None, want_verbose: bool = False) -> dict:
+        ct = override_content_type or (mimetypes.guess_type(file_path)[0] or "application/octet-stream")
+        if progress:
+            progress(f"Sende an OpenAI: {os.path.basename(file_path)}", 0)
+        # Build form data as list of tuples to support repeated fields
+        data_fields = [("model", model)]
+        if want_verbose:
+            data_fields.append(("response_format", "verbose_json"))
+            # Newer GPT-4o transcription models require explicit timestamp granularity
+            if model.startswith("gpt-4o"):
+                # Request both word and segment to maximize compatibility
+                data_fields.append(("timestamp_granularities[]", "segment"))
+                data_fields.append(("timestamp_granularities[]", "word"))
+        with open(file_path, "rb") as f:
+            response = requests.post(
+                "https://api.openai.com/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                files={"file": (os.path.basename(file_path), f, ct)},
+                data=data_fields
+            )
+        if response.status_code == 200:
+            try:
+                return response.json()
+            except Exception:
+                return {"__error__": "Invalid JSON"}
+        # Retry without verbose if requested and failed
+        if want_verbose:
+            with open(file_path, "rb") as f2:
+                resp2 = requests.post(
+                    "https://api.openai.com/v1/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                    files={"file": (os.path.basename(file_path), f2, ct)},
+                    data=[("model", model)]
+                )
+            if resp2.status_code == 200:
+                return {"text": resp2.json().get("text", "")}
+            return {"__error__": f"{resp2.status_code}: {resp2.text}"}
+        return {"__error__": f"{response.status_code}: {response.text}"}
+
+    def _extract_segments(api_resp: dict):
+        if not isinstance(api_resp, dict):
+            return None
+        # 1) Whisper-style verbose_json
+        segs = api_resp.get("segments")
+        if isinstance(segs, list) and segs:
+            out = []
+            for s in segs:
+                try:
+                    out.append({
+                        "start": float(s.get("start", 0.0)),
+                        "end": float(s.get("end", 0.0)),
+                        "text": s.get("text", "")
+                    })
+                except Exception:
+                    continue
+            return out or None
+        # 2) Some GPT-4o responses may include a 'timestamps' top-level list
+        ts = api_resp.get("timestamps")
+        if isinstance(ts, list) and ts:
+            out = []
+            for s in ts:
+                try:
+                    out.append({
+                        "start": float(s.get("start", 0.0)),
+                        "end": float(s.get("end", 0.0)),
+                        "text": s.get("text", "")
+                    })
+                except Exception:
+                    continue
+            return out or None
+        # 3) Nested structure: { timestamps: { segments: [...] } }
+        tss = api_resp.get("timestamps")
+        if isinstance(tss, dict):
+            segs2 = tss.get("segments")
+            if isinstance(segs2, list) and segs2:
+                out = []
+                for s in segs2:
+                    try:
+                        out.append({
+                            "start": float(s.get("start", 0.0)),
+                            "end": float(s.get("end", 0.0)),
+                            "text": s.get("text", "")
+                        })
+                    except Exception:
+                        continue
+                return out or None
+        # 4) Fallback: word-level timestamps only -> map words to pseudo-segments per word
+        words = api_resp.get("words")
+        if isinstance(words, list) and words:
+            out = []
+            for w in words:
+                try:
+                    out.append({
+                        "start": float(w.get("start", 0.0)),
+                        "end": float(w.get("end", 0.0)),
+                        "text": w.get("word", w.get("text", ""))
+                    })
+                except Exception:
+                    continue
+            return out or None
+        return None
+
+    def _ffprobe_duration_seconds(file_path: str) -> float:
+        try:
+            out = subprocess.check_output([
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=nw=1:nk=1", file_path
+            ], text=True)
+            return float(out.strip())
+        except Exception:
+            return 0.0
+
+    # Small file: direct upload
+    if size_mb <= MAX_CLOUD_FILE_MB:
+        if progress:
+            progress("Direkt-Upload zu OpenAI", 10)
+        resp = _send_to_openai(input_path, want_verbose=return_segments)
+        if "__error__" in resp:
+            return f"Transcription error: {resp['__error__']}"
+        if progress:
+            progress("Fertig", 100)
+        text = resp.get("text", "")
+        if not return_segments:
+            return text or "No transcription found."
+        segments = _extract_segments(resp)
+        return {"text": text or "No transcription found.", "segments": segments}
+
+    # Large file: split into chunks and transcribe sequentially
+    if progress:
+        progress("Datei zu groß – segmentiere Audio…", 5)
+    tmpdir = tempfile.mkdtemp(prefix="chunk_")
+    try:
+        out_pattern = os.path.join(tmpdir, "chunk_%03d.mp3")
+        cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error",
+            "-i", input_path,
+            "-ac", "1", "-ar", "16000", "-b:a", REENCODE_BITRATE,
+            "-f", "segment", "-segment_time", str(CHUNK_DURATION_SECONDS),
+            "-reset_timestamps", "1",
+            out_pattern,
+        ]
+        subprocess.run(cmd, check=True)
+    except FileNotFoundError:
+        return (
+            "Transcription error: ffmpeg not found on system. "
+            "Install ffmpeg (e.g., brew install ffmpeg) or use the provided Docker image."
+        )
+    except subprocess.CalledProcessError as e:
+        return f"Transcription error during audio chunking: {str(e)}"
+
+    chunks: List[str] = sorted(
+        [os.path.join(tmpdir, f) for f in os.listdir(tmpdir) if f.startswith("chunk_") and f.endswith(".mp3")]
     )
-    if response.status_code == 200:
-        json_response = response.json()
-        return json_response.get("text", "No transcription found.")
-    else:
-        return f"Transcription error: {response.status_code} - {response.text}"
+    if not chunks:
+        return "Transcription error: No chunks were produced during splitting."
+
+    parts: List[str] = []
+    all_segments: List[dict] = []
+    cumulative_offset = 0.0
+    chunk_durations = [
+        _ffprobe_duration_seconds(p) for p in chunks
+    ] if return_segments else None
+    total = len(chunks)
+    for idx, chunk_path in enumerate(chunks, start=1):
+        if progress:
+            percent = 10 + int(85 * (idx - 1) / total)  # 10-95% über Chunks
+            progress(f"Transkribiere Chunk {idx}/{total}", percent)
+        resp = _send_to_openai(chunk_path, override_content_type="audio/mpeg", want_verbose=return_segments)
+        if "__error__" in resp:
+            return f"Transcription error on chunk {idx}/{total}: {resp['__error__']}"
+        chunk_text = resp.get("text", "")
+        parts.append(chunk_text.strip())
+        if return_segments:
+            for s in (_extract_segments(resp) or []):
+                start = float(s.get("start", 0.0)) + cumulative_offset
+                end = float(s.get("end", 0.0)) + cumulative_offset
+                all_segments.append({"start": start, "end": end, "text": s.get("text", "")})
+            if chunk_durations and len(chunk_durations) >= idx:
+                cumulative_offset += float(chunk_durations[idx-1] or 0.0)
+            else:
+                cumulative_offset += float(CHUNK_DURATION_SECONDS)
+
+    merged = "\n\n".join([p for p in parts if p])
+    if progress:
+        progress("Fertig", 100)
+    # Clean up chunk dir
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    if not return_segments:
+        return merged or "No transcription found."
+    return {"text": merged or "No transcription found.", "segments": all_segments or None}
+
+
+def _is_supported_media_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        host = (parsed.netloc or "").lower()
+        allowed_hosts = (
+            "youtube.com",
+            "www.youtube.com",
+            "m.youtube.com",
+            "music.youtube.com",
+            "youtu.be",
+            "www.youtu.be",
+            "twitch.tv",
+            "www.twitch.tv",
+        )
+        return any(host.endswith(h) for h in allowed_hosts)
+    except Exception:
+        return False
+
+
+def download_audio_from_url(media_url: str, dest_dir: str, progress: Optional[Callable[[str, int], None]] = None) -> str:
+    """
+    Download audio from a supported media URL (YouTube/Twitch) using yt-dlp.
+    Returns the path to the extracted audio file (mp3).
+    """
+    if not _is_supported_media_url(media_url):
+        raise ValueError("Only YouTube or Twitch URLs are supported.")
+
+    os.makedirs(dest_dir, exist_ok=True)
+    # We use a fixed basename so we can predict the postprocessed output.
+    outtmpl = os.path.join(dest_dir, "download.%(ext)s")
+    last_percent = 0
+
+    def hook(d):
+        nonlocal last_percent
+        try:
+            if d.get('status') == 'downloading':
+                total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+                downloaded = d.get('downloaded_bytes') or 0
+                pct = 0
+                if total:
+                    pct = int(downloaded / total * 100)
+                # Map 0-100 download to 0-30 overall
+                mapped = min(30, max(0, int(pct * 0.30)))
+                if mapped != last_percent:
+                    last_percent = mapped
+                    if progress:
+                        progress(f"Lade Audio… {pct}%", mapped)
+            elif d.get('status') == 'finished':
+                if progress:
+                    progress("Download abgeschlossen – extrahiere Audio…", 30)
+        except Exception:
+            pass
+
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': outtmpl,
+        'noplaylist': True,
+        'progress_hooks': [hook],
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '128',
+        }],
+        # Reduce noisy output
+        'quiet': True,
+        'no_warnings': True,
+    }
+
+    # Run download
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([media_url])
+    except Exception as e:
+        raise RuntimeError(f"Download failed: {str(e)}")
+
+    # After postprocessing, expected file is download.mp3 in dest_dir
+    final_path = os.path.join(dest_dir, "download.mp3")
+    if not os.path.isfile(final_path):
+        # Fallback: pick the newest audio file in dest_dir
+        candidates = [
+            os.path.join(dest_dir, f) for f in os.listdir(dest_dir)
+            if f.lower().endswith(('.mp3', '.m4a', '.aac', '.wav', '.ogg', '.webm'))
+        ]
+        if not candidates:
+            raise RuntimeError("Audio extraction failed – no audio file produced.")
+        final_path = max(candidates, key=lambda p: os.path.getmtime(p))
+    return final_path
+
+
+def _update_job(job_id: str, status: str = None, percent: int = None, result: str = None, error: str = None):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id, {})
+        if status is not None:
+            job["status"] = status
+        if percent is not None:
+            job["percent"] = max(0, min(100, int(percent)))
+        if result is not None:
+            job["result"] = result
+        if error is not None:
+            job["error"] = error
+        JOBS[job_id] = job
+
+
+def _make_progress_cb(job_id: str) -> Callable[[str, int], None]:
+    def cb(status: str, percent: int):
+        _update_job(job_id, status=status, percent=percent)
+    return cb
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -80,23 +422,33 @@ def index():
                 settings_saved=True
             )
         
-        if "audio_file" not in request.files:
-            transcription = "No file selected!"
+        media_url = (request.form.get("media_url") or "").strip()
+        file = request.files.get("audio_file")
+        if (not file or file.filename == "") and not media_url:
+            transcription = "No file or URL provided!"
         else:
-            file = request.files["audio_file"]
-            if file.filename == "":
-                transcription = "No file selected!"
-            else:
-                try:
+            try:
+                # Prepare a temp path from either file upload or URL download
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    input_path = None
+                    if media_url:
+                        input_path = download_audio_from_url(media_url, temp_dir)
+                    elif file and file.filename:
+                        input_path = os.path.join(temp_dir, file.filename or "audio")
+                        file.save(input_path)
+                    if not input_path or not os.path.exists(input_path):
+                        raise RuntimeError("No input audio available")
+
                     if transcription_method == "local":
-                        transcription = transcribe_with_local_model(file, local_model_size)
+                        result = transcribe_local_from_path(input_path, local_model_size, return_segments=False)
                     else:  # cloud
                         if not OPENAI_API_KEY:
                             transcription = "Error: No API key configured for cloud transcription!"
                         else:
-                            transcription = transcribe_with_openai_api(file, cloud_model)
-                except Exception as e:
-                    transcription = f"Transcription error: {str(e)}"
+                            result = transcribe_with_openai_api_path(input_path, cloud_model, return_segments=False)
+                    transcription = result if isinstance(result, str) else result.get("text", "")
+            except Exception as e:
+                transcription = f"Transcription error: {str(e)}"
     
     return render_template(
         "index.html", 
@@ -114,24 +466,114 @@ def transcribe_ajax():
     transcription_method = request.form.get("transcription_method", "local")
     local_model_size = request.form.get("local_model_size", "base")
     cloud_model = request.form.get("cloud_model", "whisper-1")
+    with_timestamps = request.form.get("with_timestamps") in ("on", "true", "1")
 
-    if "audio_file" not in request.files:
-        return jsonify({"error": "No file selected!"}), 400
-    file = request.files["audio_file"]
-    if file.filename == "":
-        return jsonify({"error": "No file selected!"}), 400
+    media_url = (request.form.get("media_url") or "").strip()
+    file = request.files.get("audio_file")
+    if (not file or file.filename == "") and not media_url:
+        return jsonify({"error": "No file or URL provided!"}), 400
 
     try:
-        if transcription_method == "local":
-            transcription = transcribe_with_local_model(file, local_model_size)
-        else:
-            if not OPENAI_API_KEY:
-                return jsonify({"error": "Error: No API key configured for cloud transcription!"}), 400
-            transcription = transcribe_with_openai_api(file, cloud_model)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = None
+            if media_url:
+                input_path = download_audio_from_url(media_url, temp_dir)
+            elif file and file.filename:
+                input_path = os.path.join(temp_dir, file.filename or "audio")
+                file.save(input_path)
+            if not input_path or not os.path.exists(input_path):
+                return jsonify({"error": "No input audio available"}), 400
+
+            if transcription_method == "local":
+                result = transcribe_local_from_path(input_path, local_model_size, return_segments=with_timestamps)
+            else:
+                if not OPENAI_API_KEY:
+                    return jsonify({"error": "Error: No API key configured for cloud transcription!"}), 400
+                # gpt-4o(-mini)-transcribe liefert derzeit keine Timestamps -> ignorieren
+                if cloud_model.startswith("gpt-4o"):
+                    with_timestamps = False
+                result = transcribe_with_openai_api_path(input_path, cloud_model, return_segments=with_timestamps)
     except Exception as e:
         return jsonify({"error": f"Transcription error: {str(e)}"}), 500
+    if isinstance(result, dict):
+        return jsonify({"transcription": result.get("text", ""), "segments": result.get("segments")})
+    return jsonify({"transcription": str(result), "segments": None})
 
-    return jsonify({"transcription": transcription})
+
+# Async job-based transcription start (for progress UI)
+@app.route("/transcribe_start", methods=["POST"])
+def transcribe_start():
+    transcription_method = request.form.get("transcription_method", "local")
+    local_model_size = request.form.get("local_model_size", "base")
+    cloud_model = request.form.get("cloud_model", "whisper-1")
+    with_timestamps = request.form.get("with_timestamps") in ("on", "true", "1")
+
+    media_url = (request.form.get("media_url") or "").strip()
+    file = request.files.get("audio_file")
+    if (not file or file.filename == "") and not media_url:
+        return jsonify({"error": "No file or URL provided!"}), 400
+
+    # Persist file to temp dir for background processing
+    temp_dir = tempfile.mkdtemp(prefix="job_")
+    input_path = os.path.join(temp_dir, (file.filename if file and file.filename else "audio.mp3"))
+    if media_url:
+        # We'll download within the worker to report progress
+        pass
+    else:
+        file.save(input_path)
+
+    job_id = str(uuid.uuid4())
+    with JOBS_LOCK:
+        JOBS[job_id] = {"status": "Gestartet", "percent": 0}
+
+    def worker():
+        try:
+            progress_cb = _make_progress_cb(job_id)
+            local_input = input_path
+            if media_url:
+                # Download first with progress 0-30
+                _update_job(job_id, status="Lade Audio von URL…", percent=1)
+                try:
+                    local_input = download_audio_from_url(media_url, temp_dir, progress_cb)
+                except Exception as de:
+                    raise RuntimeError(str(de))
+
+            # Now transcribe (map internal progress to 30-100)
+            def mapped_progress(status: str, pct: int):
+                # pct in 0..100 -> 30..100
+                mapped = 30 + int(max(0, min(100, pct)) * 0.70)
+                _update_job(job_id, status=status, percent=mapped)
+
+            if transcription_method == "local":
+                text = transcribe_local_from_path(local_input, local_model_size, mapped_progress, return_segments=with_timestamps)
+            else:
+                if not OPENAI_API_KEY:
+                    raise RuntimeError("No API key configured for cloud transcription!")
+                # gpt-4o(-mini)-transcribe liefert derzeit keine Timestamps -> ignorieren
+                want_segments = with_timestamps and not cloud_model.startswith("gpt-4o")
+                text = transcribe_with_openai_api_path(local_input, cloud_model, mapped_progress, return_segments=want_segments)
+            _update_job(job_id, status="Fertig", percent=100, result=text)
+        except Exception as e:
+            _update_job(job_id, status="Fehler", percent=100, error=str(e))
+        finally:
+            # Clean up temp dir
+            try:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/transcribe_status/<job_id>", methods=["GET"])
+def transcribe_status(job_id):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if not job:
+        return jsonify({"error": "unknown job id"}), 404
+    return jsonify(job)
 
 # OpenAI API-compatible endpoint for transcriptions
 @app.route("/v1/audio/transcriptions", methods=["POST"])
@@ -160,11 +602,17 @@ def api_transcribe():
     # Determine desired response format (json or plain text)
     response_format = request.form.get("response_format", "json").lower()
     try:
-        transcription = transcribe_with_local_model(file, model_size)
+        want_verbose = response_format == "verbose_json"
+        result = transcribe_with_local_model(file, model_size, return_segments=want_verbose)
         if response_format == "text":
-            return Response(transcription, mimetype="text/plain")
+            return Response(result if isinstance(result, str) else result.get("text", ""), mimetype="text/plain")
+        if response_format == "verbose_json":
+            if isinstance(result, dict):
+                return jsonify({"text": result.get("text", ""), "segments": result.get("segments") or []})
+            else:
+                return jsonify({"text": result, "segments": []})
         # Default to JSON format
-        return jsonify({"text": transcription})
+        return jsonify({"text": result if isinstance(result, str) else result.get("text", "")})
     except Exception as e:
         # Return error in JSON for consistency with OpenAI API
         return jsonify({"error": str(e)}), 500

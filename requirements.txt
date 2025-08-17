@@ -3,3 +3,4 @@ requests>=2.28.1
 openai-whisper>=20231117
 torch>=2.0.0
 flask-cors>=3.0.10
+yt-dlp>=2024.8.6
