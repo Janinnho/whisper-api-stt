@@ -8,7 +8,7 @@ import threading
 import uuid
 import shutil
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, Response, g
 import requests
 import whisper
@@ -42,6 +42,9 @@ CHUNK_DURATION_SECONDS = int(os.getenv("CHUNK_DURATION_SECONDS", "600"))  # 10 m
 # Re-encode audio when chunking to ensure predictable small chunk sizes
 REENCODE_BITRATE = os.getenv("REENCODE_BITRATE", "64k")  # audio bitrate
 
+# Job timeout (in seconds). Default: 12 hours
+JOB_TIMEOUT_SECONDS = int(os.getenv("JOB_TIMEOUT_SECONDS", str(12 * 3600)))
+
 if not OPENAI_API_KEY:
     print("Note: No OPENAI_API_KEY found. Cloud transcription will not be available.")
 
@@ -52,6 +55,7 @@ JOBS_LOCK = threading.Lock()
 JOBS = {}
 DB_INIT_LOCK = threading.Lock()
 _DB_READY = False
+_WATCHDOG_STARTED = False
 
 
 class TranscriptionJob(Base):
@@ -100,6 +104,14 @@ def _ensure_db_ready():
             if not _DB_READY:
                 init_db()
                 _DB_READY = True
+    # Start watchdog once
+    global _WATCHDOG_STARTED
+    if not _WATCHDOG_STARTED:
+        with DB_INIT_LOCK:
+            if not _WATCHDOG_STARTED:
+                t = threading.Thread(target=_watchdog_loop, daemon=True)
+                t.start()
+                _WATCHDOG_STARTED = True
 
 
 @app.before_request
@@ -591,6 +603,33 @@ def _make_progress_cb(job_id: str) -> Callable[[str, int], None]:
         _update_job(job_id, status=status, percent=percent)
     return cb
 
+def _watchdog_loop():
+    while True:
+        try:
+            now_ts = time.time()
+            timed_out_ids = []
+            with JOBS_LOCK:
+                for jid, j in JOBS.items():
+                    started = j.get("started_ts") or 0
+                    if started and (now_ts - started) > JOB_TIMEOUT_SECONDS:
+                        timed_out_ids.append(jid)
+            for jid in timed_out_ids:
+                _job_set_cancel(jid)
+                _update_job(jid, status="Timeout – Abbruch", percent=100)
+                # Mark DB as cancelled if still running
+                session = SessionLocal()
+                dbj = session.get(TranscriptionJob, jid)
+                if dbj and dbj.status in ("running", "queued"):
+                    dbj.status = "cancelled"
+                    dbj.error = "Timed out"
+                    dbj.finished_at = datetime.utcnow()
+                    session.add(dbj)
+                    session.commit()
+                session.close()
+        except Exception:
+            pass
+        time.sleep(30)
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     transcription = None
@@ -724,7 +763,7 @@ def transcribe_start():
 
     job_id = str(uuid.uuid4())
     with JOBS_LOCK:
-        JOBS[job_id] = {"status": "Gestartet", "percent": 0, "cancelled": False}
+        JOBS[job_id] = {"status": "Gestartet", "percent": 0, "cancelled": False, "started_ts": time.time()}
 
     # Create DB entry
     session = SessionLocal()
@@ -853,22 +892,25 @@ def jobs_active():
     is_admin = _is_current_user_admin()
     current = getattr(g, "user_email", None)
     with JOBS_LOCK:
-        for jid, j in JOBS.items():
+        for jid, j in list(JOBS.items()):
             dbj = session.get(TranscriptionJob, jid)
+            # Only show running jobs
+            if not dbj or dbj.status not in ("running", "queued"):
+                continue
             if not is_admin:
-                if dbj and dbj.user_email and dbj.user_email != current:
+                if dbj.user_email and dbj.user_email != current:
                     continue
             payload.append({
                 "id": jid,
                 "status": j.get("status"),
                 "percent": j.get("percent", 0),
                 "error": j.get("error"),
-                "method": getattr(dbj, "method", None) if dbj else None,
+                "method": dbj.method if dbj else None,
                 "model": (dbj.cloud_model if dbj and dbj.method == "cloud" else (dbj.local_model_size if dbj else None)),
-                "source_type": getattr(dbj, "source_type", None) if dbj else None,
-                "source_url": getattr(dbj, "source_url", None) if dbj else None,
+                "source_type": dbj.source_type if dbj else None,
+                "source_url": dbj.source_url if dbj else None,
                 "started_at": (dbj.started_at.isoformat() + "Z") if (dbj and dbj.started_at) else None,
-                "user_email": getattr(dbj, "user_email", None) if dbj else None,
+                "user_email": dbj.user_email if dbj else None,
             })
     session.close()
     return jsonify(payload)
@@ -876,9 +918,6 @@ def jobs_active():
 
 @app.route("/jobs/cancel/<job_id>", methods=["POST"])
 def jobs_cancel(job_id):
-    ok = _job_set_cancel(job_id)
-    if not ok:
-        return jsonify({"error": "unknown job id"}), 404
     # Permission check: only owner or admin can cancel
     session = SessionLocal()
     dbj = session.get(TranscriptionJob, job_id)
@@ -886,6 +925,11 @@ def jobs_cancel(job_id):
     if not _is_current_user_admin():
         if dbj and dbj.user_email and dbj.user_email != getattr(g, "user_email", None):
             return jsonify({"error": "forbidden"}), 403
+    ok = _job_set_cancel(job_id)
+    if not ok:
+        return jsonify({"error": "unknown job id"}), 404
+    # Update visible status immediately
+    _update_job(job_id, status="Abbruch angefordert", percent=None)
     return jsonify({"ok": True})
 
 
