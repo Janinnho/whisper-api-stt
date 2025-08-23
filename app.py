@@ -870,18 +870,51 @@ def transcribe_start():
 
 @app.route("/transcribe_status/<job_id>", methods=["GET"])
 def transcribe_status(job_id):
+    # Try in-memory first
     with JOBS_LOCK:
         job = JOBS.get(job_id)
-    if not job:
-        return jsonify({"error": "unknown job id"}), 404
-    # Permission: non-admins can only see their own jobs
+    # Always fetch DB to enforce permissions and build fallback
     session = SessionLocal()
     dbj = session.get(TranscriptionJob, job_id)
     session.close()
+    if not dbj and not job:
+        return jsonify({"error": "unknown job id"}), 404
+    # Permission: non-admins can only see their own jobs
     if not _is_current_user_admin():
-        if dbj and dbj.user_email and dbj.user_email != getattr(g, "user_email", None):
+        owner = getattr(dbj, "user_email", None) if dbj else None
+        if owner and owner != getattr(g, "user_email", None):
             return jsonify({"error": "forbidden"}), 403
-    return jsonify(job)
+    # If in-memory exists, prefer that
+    if job:
+        return jsonify(job)
+    # Fallback: build status from DB so UI can complete and render
+    resp = {
+        "status": None,
+        "percent": getattr(dbj, "percent", 0) if dbj else 0,
+        "result": None,
+        "error": None,
+    }
+    if dbj:
+        if dbj.status == "completed":
+            resp["status"] = "Fertig"
+            resp["percent"] = 100
+            # Build result object to match UI expectations
+            segs = None
+            try:
+                if dbj.result_segments:
+                    segs = json.loads(dbj.result_segments)
+            except Exception:
+                segs = None
+            resp["result"] = {"text": dbj.result_text or "", "segments": segs}
+        elif dbj.status in ("error", "cancelled"):
+            resp["status"] = "Fehler" if dbj.status == "error" else "Abgebrochen"
+            resp["percent"] = 100
+            resp["error"] = dbj.error or ("Cancelled" if dbj.status == "cancelled" else "Error")
+        else:
+            # running/queued but not in memory -> minimal running state
+            resp["status"] = "Läuft…"
+            resp["percent"] = int(dbj.percent or 0)
+    return jsonify(resp)
 
 
 @app.route("/jobs/active", methods=["GET"])
