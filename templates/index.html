@@ -262,6 +262,9 @@
             <button class="tab active" onclick="openTab(event, 'transcribe-tab')">Transcribe</button>
             <button class="tab" onclick="openTab(event, 'jobs-tab')">Jobs</button>
             <button class="tab" onclick="openTab(event, 'history-tab')">History</button>
+            {% if cf_enforced %}
+            <button class="tab" onclick="openTab(event, 'users-tab')">Users</button>
+            {% endif %}
             <button class="tab" onclick="openTab(event, 'settings-tab')">API Settings</button>
         </div>
         
@@ -380,6 +383,19 @@
             </div>
         </div>
 
+        {% if cf_enforced %}
+        <!-- Users Tab -->
+        <div id="users-tab" class="tab-content">
+            <div class="card">
+                <h2>Users</h2>
+                <div class="controls-row" style="margin: 10px 0;">
+                    <button class="button secondary" id="users-refresh"><i class="fas fa-sync"></i> Refresh</button>
+                </div>
+                <div id="users-list"></div>
+            </div>
+        </div>
+        {% endif %}
+
         <!-- Settings Tab -->
         <div id="settings-tab" class="tab-content">
             <div class="card">
@@ -473,6 +489,9 @@
             }
             if (tabId === 'history-tab') {
                 loadHistory();
+            }
+            if (tabId === 'users-tab') {
+                loadUsers();
             }
         }
         
@@ -682,6 +701,7 @@
                             <div>
                                 <div><strong>${j.id}</strong></div>
                                 <div class="note">${j.method || ''} • ${j.model || ''} • ${j.source_type || ''}</div>
+                                <div class="note">User: ${j.user_email || 'API'}</div>
                                 <div class="note">${j.started_at ? ('Started: ' + j.started_at) : ''}</div>
                                 <div class="note">Status: ${j.status || ''} • ${typeof j.percent==='number'? j.percent: 0}%</div>
                             </div>
@@ -722,9 +742,10 @@
                     historyDetail.innerHTML = '';
                     return;
                 }
-                const table = [`<table style="width:100%; border-collapse: collapse;">
+        const table = [`<table style="width:100%; border-collapse: collapse;">
                     <thead><tr>
                         <th style="text-align:left; padding:6px; border-bottom:1px solid #ddd;">ID</th>
+            <th style="text-align:left; padding:6px; border-bottom:1px solid #ddd;">User</th>
                         <th style="text-align:left; padding:6px; border-bottom:1px solid #ddd;">Status</th>
                         <th style="text-align:left; padding:6px; border-bottom:1px solid #ddd;">Method</th>
                         <th style="text-align:left; padding:6px; border-bottom:1px solid #ddd;">Model</th>
@@ -735,6 +756,7 @@
                 for (const it of items){
                     table.push(`<tr>
                         <td style="padding:6px; border-bottom:1px solid #eee; font-family:monospace;">${it.id}</td>
+            <td style="padding:6px; border-bottom:1px solid #eee;">${it.user_email || 'API'}</td>
                         <td style="padding:6px; border-bottom:1px solid #eee;">${it.status}</td>
                         <td style="padding:6px; border-bottom:1px solid #eee;">${it.method}</td>
                         <td style="padding:6px; border-bottom:1px solid #eee;">${it.model || ''}</td>
@@ -803,7 +825,36 @@
                 document.getElementById('hist-dl-ts').addEventListener('click', ()=>{ download(buildTS(), 'transcript_with_timestamps.txt'); });
             }
 
-            function loadHistory(){ fetch('/history/list').then(r=>r.json()).then(renderHistory); }
+                        function loadHistory(){ fetch('/history/list').then(r=>r.json()).then(renderHistory); }
+
+                        // Users UI
+                        const usersList = document.getElementById('users-list');
+                        const usersRefreshBtn = document.getElementById('users-refresh');
+                        function renderUsers(items){
+                                if (!items || !items.length){ usersList.innerHTML = '<p class="note">No users.</p>'; return; }
+                                const rows = items.map(u=>`
+                                <div class="card" style="margin:10px 0; display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                                    <div>
+                                        <div><strong>${u.email}</strong> ${u.is_admin ? '<span class="note">(admin)</span>' : ''}</div>
+                                        <div class="note">First: ${u.first_seen || ''} • Last: ${u.last_seen || ''}</div>
+                                    </div>
+                                    <div class="controls-row">
+                                        <button class="button secondary" data-toggle-admin="${u.email}"><i class="fas fa-user-shield"></i> Toggle admin</button>
+                                    </div>
+                                </div>`).join('');
+                                usersList.innerHTML = rows;
+                                [...usersList.querySelectorAll('[data-toggle-admin]')].forEach(btn=>{
+                                        btn.addEventListener('click', ()=>{
+                                                const email = btn.getAttribute('data-toggle-admin');
+                                                fetch('/users/toggle_admin', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email }) })
+                                                        .then(r=>r.json())
+                                                        .then(res=>{ if (res.error){ alert(res.error); } else { loadUsers(); } })
+                                                        .catch(()=>alert('Toggle failed'));
+                                        });
+                                });
+                        }
+                        function loadUsers(){ if (usersList) { fetch('/users/list').then(r=>r.json()).then(renderUsers); } }
+                        if (usersRefreshBtn){ usersRefreshBtn.addEventListener('click', (e)=>{ e.preventDefault(); loadUsers(); }); }
             historyRefreshBtn.addEventListener('click', (e)=>{ e.preventDefault(); loadHistory(); });
         });
     </script>

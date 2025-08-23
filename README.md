@@ -108,6 +108,7 @@ Tabs:
 - Jobs: shows running jobs with live progress; cancel jobs
 - History: list completed/error/cancelled transcriptions; view details and download text; delete entries
 - API Settings: pick default local model to serve when clients pass `model=whisper-1`
+ - Users (only when `CF_ACCESS_ENFORCE=true`): list authenticated users; first user becomes admin automatically; admins can toggle admin state of users
 
 ### API Usage
 
@@ -137,7 +138,12 @@ The API can also accept `whisper-1` as a model parameter for compatibility with 
 
 - `OPENAI_API_KEY`: API key for OpenAI Cloud (optional)
 - `LOCAL_API_KEY`: API key to protect the local API endpoint (optional)
-- `CF_ACCESS_ENFORCE`: if `true`, requires Cloudflare Access header `CF-Access-Authenticated-User-Email` to be present (value is stored in DB for jobs)
+- `CF_ACCESS_ENFORCE`: if `true`, requires Cloudflare Access header `CF-Access-Authenticated-User-Email` for the web UI and related endpoints. The OpenAI-compatible API endpoint `/v1/audio/transcriptions` remains accessible without this header (still optionally guarded by `LOCAL_API_KEY`).
+
+When Cloudflare enforcement is enabled:
+- The first authenticated user becomes admin automatically.
+- Admins see all jobs/history and can toggle admin rights for any user.
+- Non-admin users only see their own jobs/history.
 - `DB_PATH`: path to SQLite database file (defaults to `/data/app.db`); ensure the directory exists or map a Docker volume
 
 ### Cloud upload limits and chunking

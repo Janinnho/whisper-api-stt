@@ -73,6 +73,14 @@ class TranscriptionJob(Base):
     duration_seconds = Column(Integer, nullable=True)
 
 
+class User(Base):
+    __tablename__ = "users"
+    email = Column(String, primary_key=True)
+    is_admin = Column(Boolean, default=False)
+    first_seen = Column(DateTime, nullable=True)
+    last_seen = Column(DateTime, nullable=True)
+
+
 def init_db():
     try:
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -83,13 +91,38 @@ def init_db():
 
 @app.before_request
 def _cf_access_auth():
-    # Set user context; enforce Cloudflare Access header if enabled
+    # Set user context; enforce Cloudflare Access header for UI routes only (API remains unaffected)
     g.user_email = None
     hdr = request.headers.get("CF-Access-Authenticated-User-Email")
     if hdr:
         g.user_email = hdr
-    if CF_ACCESS_ENFORCE and not g.user_email:
-        return jsonify({"error": "Unauthorized (Cloudflare Access required)."}), 401
+
+    path = request.path or ""
+
+    # If CF auth is enforced, require header for UI and non-API routes
+    if CF_ACCESS_ENFORCE:
+        if not path.startswith("/v1/audio/transcriptions"):
+            if not g.user_email:
+                return jsonify({"error": "Unauthorized (Cloudflare Access required)."}), 401
+
+    # Persist or update user when CF is used and header present
+    if g.user_email:
+        session = SessionLocal()
+        user = session.get(User, g.user_email)
+        now = datetime.utcnow()
+        if not user:
+            # Create and maybe make first admin
+            user = User(email=g.user_email, is_admin=False, first_seen=now, last_seen=now)
+            session.add(user)
+            session.flush()
+            # If no admin exists, make this one admin
+            any_admin = session.query(User).filter(User.is_admin == True).first()
+            if not any_admin:
+                user.is_admin = True
+        else:
+            user.last_seen = now
+        session.commit()
+        session.close()
 
 def load_local_model(model_size="base"):
     global local_model, current_model_size
@@ -609,7 +642,10 @@ def index():
         local_model_size=local_model_size,
         cloud_model=cloud_model,
         api_model=DEFAULT_API_MODEL,
-        cloud_available=cloud_available
+        cloud_available=cloud_available,
+        cf_enforced=CF_ACCESS_ENFORCE,
+        current_user_email=getattr(g, "user_email", None),
+        user_is_admin=_is_current_user_admin()
     )
     
 @app.route("/transcribe", methods=["POST"])
@@ -682,7 +718,7 @@ def transcribe_start():
     session = SessionLocal()
     db_job = TranscriptionJob(
         id=job_id,
-        user_email=getattr(g, "user_email", None),
+        user_email=(getattr(g, "user_email", None) or None),
         source_type=("url" if media_url else "file"),
         source_url=(media_url or None),
         original_filename=(os.path.basename(input_path) if (file and file.filename) else None),
@@ -787,21 +823,29 @@ def transcribe_status(job_id):
         job = JOBS.get(job_id)
     if not job:
         return jsonify({"error": "unknown job id"}), 404
+    # Permission: non-admins can only see their own jobs
+    session = SessionLocal()
+    dbj = session.get(TranscriptionJob, job_id)
+    session.close()
+    if not _is_current_user_admin():
+        if dbj and dbj.user_email and dbj.user_email != getattr(g, "user_email", None):
+            return jsonify({"error": "forbidden"}), 403
     return jsonify(job)
 
 
 @app.route("/jobs/active", methods=["GET"])
 def jobs_active():
-    # Return in-memory active jobs enriched with DB metadata
+    # Return in-memory active jobs enriched with DB metadata; filter by user if not admin
     session = SessionLocal()
     payload = []
+    is_admin = _is_current_user_admin()
+    current = getattr(g, "user_email", None)
     with JOBS_LOCK:
         for jid, j in JOBS.items():
-            status = j.get("status")
-            if status in ("Gestartet", "Lade Audio von URL…", "Fertig", "Fehler"):
-                # include all, UI can filter
-                pass
             dbj = session.get(TranscriptionJob, jid)
+            if not is_admin:
+                if dbj and dbj.user_email and dbj.user_email != current:
+                    continue
             payload.append({
                 "id": jid,
                 "status": j.get("status"),
@@ -823,6 +867,13 @@ def jobs_cancel(job_id):
     ok = _job_set_cancel(job_id)
     if not ok:
         return jsonify({"error": "unknown job id"}), 404
+    # Permission check: only owner or admin can cancel
+    session = SessionLocal()
+    dbj = session.get(TranscriptionJob, job_id)
+    session.close()
+    if not _is_current_user_admin():
+        if dbj and dbj.user_email and dbj.user_email != getattr(g, "user_email", None):
+            return jsonify({"error": "forbidden"}), 403
     return jsonify({"ok": True})
 
 
@@ -830,6 +881,8 @@ def jobs_cancel(job_id):
 def history_list():
     session = SessionLocal()
     q = session.query(TranscriptionJob).filter(TranscriptionJob.status.in_(["completed", "error", "cancelled"]))
+    if not _is_current_user_admin():
+        q = q.filter(TranscriptionJob.user_email == getattr(g, "user_email", None))
     q = q.order_by(TranscriptionJob.finished_at.desc().nullslast(), TranscriptionJob.started_at.desc())
     limit = int(request.args.get("limit", "100"))
     items = q.limit(limit).all()
@@ -848,7 +901,7 @@ def history_list():
             "finished_at": it.finished_at.isoformat() + "Z" if it.finished_at else None,
             "duration_seconds": it.duration_seconds,
             "text_len": len(it.result_text or ""),
-            "user_email": it.user_email,
+            "user_email": it.user_email or "API",
         })
     session.close()
     return jsonify(out)
@@ -861,6 +914,10 @@ def history_item(job_id):
     if not it:
         session.close()
         return jsonify({"error": "not found"}), 404
+    if not _is_current_user_admin():
+        if it.user_email and it.user_email != getattr(g, "user_email", None):
+            session.close()
+            return jsonify({"error": "forbidden"}), 403
     payload = {
         "id": it.id,
         "status": it.status,
@@ -875,7 +932,7 @@ def history_item(job_id):
         "duration_seconds": it.duration_seconds,
         "text": it.result_text or "",
         "segments": None,
-        "user_email": it.user_email,
+        "user_email": it.user_email or "API",
     }
     try:
         if it.result_segments:
@@ -893,10 +950,79 @@ def history_delete(job_id):
     if not it:
         session.close()
         return jsonify({"error": "not found"}), 404
+    if not _is_current_user_admin():
+        if it.user_email and it.user_email != getattr(g, "user_email", None):
+            session.close()
+            return jsonify({"error": "forbidden"}), 403
     session.delete(it)
     session.commit()
     session.close()
     return jsonify({"ok": True})
+
+
+def _is_current_user_admin() -> bool:
+    if not getattr(g, "user_email", None):
+        return False
+    session = SessionLocal()
+    u = session.get(User, g.user_email)
+    session.close()
+    return bool(u and u.is_admin)
+
+
+@app.route("/users/list", methods=["GET"])
+def users_list():
+    if not CF_ACCESS_ENFORCE:
+        return jsonify({"error": "Cloudflare auth not enabled"}), 400
+    if not _is_current_user_admin():
+        # Non-admins can see themselves only
+        session = SessionLocal()
+        me = session.get(User, getattr(g, "user_email", None))
+        session.close()
+        if not me:
+            return jsonify([])
+        return jsonify([{ "email": me.email, "is_admin": bool(me.is_admin),
+                          "first_seen": me.first_seen.isoformat()+"Z" if me.first_seen else None,
+                          "last_seen": me.last_seen.isoformat()+"Z" if me.last_seen else None }])
+    session = SessionLocal()
+    users = session.query(User).order_by(User.first_seen.asc().nullsfirst()).all()
+    out = []
+    for u in users:
+        out.append({
+            "email": u.email,
+            "is_admin": bool(u.is_admin),
+            "first_seen": u.first_seen.isoformat()+"Z" if u.first_seen else None,
+            "last_seen": u.last_seen.isoformat()+"Z" if u.last_seen else None,
+        })
+    session.close()
+    return jsonify(out)
+
+
+@app.route("/users/toggle_admin", methods=["POST"])
+def users_toggle_admin():
+    if not CF_ACCESS_ENFORCE:
+        return jsonify({"error": "Cloudflare auth not enabled"}), 400
+    if not _is_current_user_admin():
+        return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip()
+    if not email:
+        return jsonify({"error": "missing email"}), 400
+    session = SessionLocal()
+    u = session.get(User, email)
+    if not u:
+        session.close()
+        return jsonify({"error": "not found"}), 404
+    # Prevent demoting the last admin
+    if u.is_admin:
+        admins = session.query(User).filter(User.is_admin == True).all()
+        if len(admins) <= 1:
+            session.close()
+            return jsonify({"error": "cannot demote the last admin"}), 400
+    u.is_admin = not u.is_admin
+    session.add(u)
+    session.commit()
+    session.close()
+    return jsonify({"ok": True, "email": email, "is_admin": u.is_admin})
 
 # OpenAI API-compatible endpoint for transcriptions
 @app.route("/v1/audio/transcriptions", methods=["POST"])
