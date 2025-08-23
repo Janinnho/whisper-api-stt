@@ -1,18 +1,19 @@
 # Whisper Web App
 
-A web application for audio transcription using OpenAI's Whisper model. The application supports both local transcription with the Whisper model and the use of the OpenAI Cloud API.
+A web app for audio transcription using local Whisper and OpenAI Cloud. Now with background jobs, Jobs/History views, database persistence, Cloudflare Access auth support, and media URL (YouTube/Twitch) ingestion.
 
 ## Features
 
-- Transcription with local Whisper model (tiny, base, small, medium, large)
-- Transcription with OpenAI Cloud API (whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe)
-- OpenAI API-compatible endpoint (`/v1/audio/transcriptions`)
-- Optional API key protection for the local API endpoint
-- Modern UI with copy-to-clipboard functionality
-- Configurable default model for API compatibility mode
-- Automatic chunking for large files when using the OpenAI Cloud API: files > 20 MB are split and uploaded in parts; results are merged
- - Optional timestamps (segments) for local Whisper and whisper-1. Note: gpt-4o-transcribe and gpt-4o-mini-transcribe currently do not return timestamps.
- - Provide a YouTube or Twitch URL instead of a file: the app downloads audio via yt-dlp, then transcribes it (temporary file is deleted).
+- Local Whisper models (tiny, base, small, medium, large)
+- OpenAI Cloud API (whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe)
+- Background jobs that keep running even if the page is closed
+- Jobs view: monitor progress and cancel running transcriptions
+- History: browse previous transcriptions, view details, download or delete
+- Database persistence (SQLite); Docker image exposes a /data volume for the DB
+- Cloudflare Access support via header CF-Access-Authenticated-User-Email when enabled
+- OpenAI API-compatible endpoint (`/v1/audio/transcriptions`) with optional LOCAL_API_KEY check
+- YouTube/Twitch URL ingestion via yt-dlp, with progress and temporary cleanup
+- Modern UI with copy, search and export
 
 ## Installation
 
@@ -21,7 +22,7 @@ A web application for audio transcription using OpenAI's Whisper model. The appl
 - Docker (for Docker method)
 - Python 3.9+ (for local installation)
 
-### With Docker
+### With Docker (recommended)
 
 ```bash
 #Download from Github
@@ -32,13 +33,16 @@ cd whisper-api-stt
 docker build -t whisper-web-app .
 
 # Start the container without API key
-docker run -p 5000:5000 whisper-web-app
+docker run -p 5000:5000 -v whisper-data:/data whisper-web-app
 
 # Start with local API key
-docker run -p 5000:5000 -e LOCAL_API_KEY=your_api_key whisper-web-app
+docker run -p 5000:5000 -v whisper-data:/data -e LOCAL_API_KEY=your_api_key whisper-web-app
 
 # Start with OpenAI API key for cloud transcription
-docker run -p 5000:5000 -e OPENAI_API_KEY=your_openai_key whisper-web-app
+docker run -p 5000:5000 -v whisper-data:/data -e OPENAI_API_KEY=your_openai_key whisper-web-app
+
+# Enable Cloudflare Access header enforcement (only allow authenticated users)
+docker run -p 5000:5000 -v whisper-data:/data -e CF_ACCESS_ENFORCE=true whisper-web-app
 ```
 
 Note: The image installs ffmpeg which is required for automatic chunking.
@@ -65,6 +69,8 @@ pip install -r requirements.txt
 
 # Run the Flask application
 # Without API keys
+export DB_PATH=$(pwd)/data/app.db
+mkdir -p $(dirname "$DB_PATH")
 flask run
 # or
 python app.py
@@ -95,12 +101,13 @@ pip install yt-dlp
 
 ### Web Interface
 
-Open http://localhost:5000 in your browser and use the form to upload and transcribe audio files.
-Alternatively, switch input source to "YouTube/Twitch URL" and paste a media link; the app will download the audio and transcribe it.
+Open http://localhost:5000 in your browser.
 
-The web interface offers two main tabs:
-1. **Transcribe**: Upload and transcribe audio files using either local Whisper models or OpenAI Cloud API.
-2. **API Settings**: Configure which local model should be used when the API receives requests with `model=whisper-1`.
+Tabs:
+- Transcribe: file upload or YouTube/Twitch URL; choose local or cloud model; optional timestamps
+- Jobs: shows running jobs with live progress; cancel jobs
+- History: list completed/error/cancelled transcriptions; view details and download text; delete entries
+- API Settings: pick default local model to serve when clients pass `model=whisper-1`
 
 ### API Usage
 
@@ -130,6 +137,8 @@ The API can also accept `whisper-1` as a model parameter for compatibility with 
 
 - `OPENAI_API_KEY`: API key for OpenAI Cloud (optional)
 - `LOCAL_API_KEY`: API key to protect the local API endpoint (optional)
+- `CF_ACCESS_ENFORCE`: if `true`, requires Cloudflare Access header `CF-Access-Authenticated-User-Email` to be present (value is stored in DB for jobs)
+- `DB_PATH`: path to SQLite database file (defaults to `/data/app.db`); ensure the directory exists or map a Docker volume
 
 ### Cloud upload limits and chunking
 
@@ -142,6 +151,12 @@ You can override defaults with environment variables:
 - `REENCODE_BITRATE` (default: `64k`): Audio bitrate for chunked files. Lower values yield smaller chunks.
 
 If ffmpeg is not found, the server will return a clear error message indicating it needs to be installed.
+
+## Data persistence and Docker volumes
+
+By default, the database is created at `/data/app.db`. The Docker image declares `/data` as a volume. Use `-v whisper-data:/data` (named volume) or `-v $(pwd)/data:/data` to persist the DB between restarts.
+
+Records include job metadata, status, timing, the transcribed text and (if requested/available) segments. You can delete records from the History tab.
 
 ### Timestamps support
 

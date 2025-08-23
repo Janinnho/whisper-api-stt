@@ -8,11 +8,14 @@ import threading
 import uuid
 import shutil
 import time
-from flask import Flask, render_template, request, jsonify, Response
+from datetime import datetime
+from flask import Flask, render_template, request, jsonify, Response, g
 import requests
 import whisper
 from urllib.parse import urlparse
 import yt_dlp
+from sqlalchemy import create_engine, Column, String, Integer, Text, DateTime, Boolean
+from sqlalchemy.orm import sessionmaker, declarative_base
 
 from flask_cors import CORS
 app = Flask(__name__)
@@ -21,6 +24,15 @@ CORS(app)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 LOCAL_API_KEY = os.getenv("LOCAL_API_KEY", None)  # Optional API key for local API
 DEFAULT_API_MODEL = "base"  # Default model for API requests
+
+# Database setup (SQLite by default; path configurable)
+DB_PATH = os.getenv("DB_PATH", "/data/app.db")
+engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+Base = declarative_base()
+
+# Cloudflare Access enforcement
+CF_ACCESS_ENFORCE = os.getenv("CF_ACCESS_ENFORCE", "false").strip().lower() in ("1", "true", "yes", "on")
 
 # Cloud Upload Limits / Chunking Settings
 # Threshold in MB after which we split before sending to OpenAI API
@@ -39,6 +51,46 @@ current_model_size = None
 JOBS_LOCK = threading.Lock()
 JOBS = {}
 
+
+class TranscriptionJob(Base):
+    __tablename__ = "transcription_jobs"
+    id = Column(String, primary_key=True)
+    user_email = Column(String, nullable=True)
+    source_type = Column(String, nullable=True)  # file|url
+    source_url = Column(Text, nullable=True)
+    original_filename = Column(String, nullable=True)
+    method = Column(String, nullable=False)  # local|cloud
+    local_model_size = Column(String, nullable=True)
+    cloud_model = Column(String, nullable=True)
+    with_timestamps = Column(Boolean, default=False)
+    status = Column(String, default="queued")  # queued|running|completed|error|cancelled
+    percent = Column(Integer, default=0)
+    error = Column(Text, nullable=True)
+    result_text = Column(Text, nullable=True)
+    result_segments = Column(Text, nullable=True)  # JSON string
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+
+
+def init_db():
+    try:
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    except Exception:
+        pass
+    Base.metadata.create_all(engine)
+
+
+@app.before_request
+def _cf_access_auth():
+    # Set user context; enforce Cloudflare Access header if enabled
+    g.user_email = None
+    hdr = request.headers.get("CF-Access-Authenticated-User-Email")
+    if hdr:
+        g.user_email = hdr
+    if CF_ACCESS_ENFORCE and not g.user_email:
+        return jsonify({"error": "Unauthorized (Cloudflare Access required)."}), 401
+
 def load_local_model(model_size="base"):
     global local_model, current_model_size
     if local_model is None or current_model_size != model_size:
@@ -54,12 +106,101 @@ def transcribe_with_local_model(audio_file, model_size="base", progress: Optiona
         return transcribe_local_from_path(temp_file.name, model_size, progress, return_segments)
 
 
-def transcribe_local_from_path(file_path: str, model_size="base", progress: Optional[Callable[[str, int], None]] = None, return_segments: bool = False):
+def transcribe_local_from_path(file_path: str, model_size="base", progress: Optional[Callable[[str, int], None]] = None, return_segments: bool = False, cancel_check: Optional[Callable[[], bool]] = None):
     if progress:
         progress("Lade lokales Whisper-Modell", 5)
     model = load_local_model(model_size)
     if progress:
         progress("Transkribiere lokal…", 10)
+    # For better cancellation responsiveness on large files, split into chunks if duration is long
+    try:
+        out = subprocess.check_output([
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=nw=1:nk=1", file_path
+        ], text=True)
+        duration = float(out.strip())
+    except Exception:
+        duration = 0.0
+
+    if duration and duration > CHUNK_DURATION_SECONDS * 1.5:
+        # Chunked local transcription with cancellation between chunks
+        tmpdir = tempfile.mkdtemp(prefix="local_chunk_")
+        try:
+            out_pattern = os.path.join(tmpdir, "chunk_%03d.mp3")
+            cmd = [
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "-i", file_path,
+                "-ac", "1", "-ar", "16000", "-b:a", REENCODE_BITRATE,
+                "-f", "segment", "-segment_time", str(CHUNK_DURATION_SECONDS),
+                "-reset_timestamps", "1",
+                out_pattern,
+            ]
+            subprocess.run(cmd, check=True)
+        except Exception as e:
+            # Fallback to single-shot
+            result = model.transcribe(file_path)
+            if progress:
+                progress("Fertig", 100)
+            text = result.get("text", "")
+            if not return_segments:
+                return text
+            segments = [
+                {"start": float(s.get("start", 0.0)), "end": float(s.get("end", 0.0)), "text": s.get("text", "")}
+                for s in (result.get("segments") or [])
+            ]
+            return {"text": text, "segments": segments}
+
+        chunks: List[str] = sorted(
+            [os.path.join(tmpdir, f) for f in os.listdir(tmpdir) if f.startswith("chunk_") and f.endswith(".mp3")]
+        )
+        parts: List[str] = []
+        all_segments: List[dict] = []
+        total = len(chunks) or 1
+        cum_offset = 0.0
+        # gather durations
+        durations = []
+        for p in chunks:
+            try:
+                out = subprocess.check_output([
+                    "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                    "-of", "default=nw=1:nk=1", p
+                ], text=True)
+                durations.append(float(out.strip()))
+            except Exception:
+                durations.append(float(CHUNK_DURATION_SECONDS))
+
+        for idx, ch in enumerate(chunks, start=1):
+            if cancel_check and cancel_check():
+                if progress:
+                    progress("Abgebrochen", 100)
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                raise RuntimeError("Cancelled")
+            if progress:
+                percent = 10 + int(85 * (idx - 1) / total)
+                progress(f"Transkribiere Chunk {idx}/{total}", percent)
+            r = model.transcribe(ch)
+            parts.append((r.get("text") or "").strip())
+            if return_segments:
+                for s in (r.get("segments") or []):
+                    all_segments.append({
+                        "start": float(s.get("start", 0.0)) + cum_offset,
+                        "end": float(s.get("end", 0.0)) + cum_offset,
+                        "text": s.get("text", "")
+                    })
+            try:
+                cum_offset += float(durations[idx-1] or 0.0)
+            except Exception:
+                cum_offset += float(CHUNK_DURATION_SECONDS)
+        merged = "\n\n".join([p for p in parts if p])
+        if progress:
+            progress("Fertig", 100)
+        if not return_segments:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            return merged
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return {"text": merged, "segments": all_segments or None}
+
+    # Small files: single-shot
     result = model.transcribe(file_path)
     if progress:
         progress("Fertig", 100)
@@ -84,7 +225,7 @@ def transcribe_with_openai_api(audio_file, model="whisper-1", progress: Optional
         return transcribe_with_openai_api_path(input_path, model, progress, return_segments)
 
 
-def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress: Optional[Callable[[str, int], None]] = None, return_segments: bool = False):
+def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress: Optional[Callable[[str, int], None]] = None, return_segments: bool = False, cancel_check: Optional[Callable[[], bool]] = None):
     valid_models = ["whisper-1", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"]
     if model not in valid_models:
         model = "whisper-1"
@@ -256,6 +397,8 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
     ] if return_segments else None
     total = len(chunks)
     for idx, chunk_path in enumerate(chunks, start=1):
+        if cancel_check and cancel_check():
+            return "Cancelled"
         if progress:
             percent = 10 + int(85 * (idx - 1) / total)  # 10-95% über Chunks
             progress(f"Transkribiere Chunk {idx}/{total}", percent)
@@ -387,6 +530,15 @@ def _update_job(job_id: str, status: str = None, percent: int = None, result: st
         if error is not None:
             job["error"] = error
         JOBS[job_id] = job
+
+def _job_set_cancel(job_id: str):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if not job:
+            return False
+        job["cancelled"] = True
+        JOBS[job_id] = job
+        return True
 
 
 def _make_progress_cb(job_id: str) -> Callable[[str, int], None]:
@@ -524,7 +676,27 @@ def transcribe_start():
 
     job_id = str(uuid.uuid4())
     with JOBS_LOCK:
-        JOBS[job_id] = {"status": "Gestartet", "percent": 0}
+        JOBS[job_id] = {"status": "Gestartet", "percent": 0, "cancelled": False}
+
+    # Create DB entry
+    session = SessionLocal()
+    db_job = TranscriptionJob(
+        id=job_id,
+        user_email=getattr(g, "user_email", None),
+        source_type=("url" if media_url else "file"),
+        source_url=(media_url or None),
+        original_filename=(os.path.basename(input_path) if (file and file.filename) else None),
+        method=transcription_method,
+        local_model_size=local_model_size,
+        cloud_model=cloud_model,
+        with_timestamps=with_timestamps,
+        status="running",
+        percent=0,
+        started_at=datetime.utcnow(),
+    )
+    session.add(db_job)
+    session.commit()
+    session.close()
 
     def worker():
         try:
@@ -544,17 +716,59 @@ def transcribe_start():
                 mapped = 30 + int(max(0, min(100, pct)) * 0.70)
                 _update_job(job_id, status=status, percent=mapped)
 
+            def cancel_check():
+                with JOBS_LOCK:
+                    return JOBS.get(job_id, {}).get("cancelled", False)
+
+            start_ts = time.time()
             if transcription_method == "local":
-                text = transcribe_local_from_path(local_input, local_model_size, mapped_progress, return_segments=with_timestamps)
+                text = transcribe_local_from_path(local_input, local_model_size, mapped_progress, return_segments=with_timestamps, cancel_check=cancel_check)
             else:
                 if not OPENAI_API_KEY:
                     raise RuntimeError("No API key configured for cloud transcription!")
                 # gpt-4o(-mini)-transcribe liefert derzeit keine Timestamps -> ignorieren
                 want_segments = with_timestamps and not cloud_model.startswith("gpt-4o")
-                text = transcribe_with_openai_api_path(local_input, cloud_model, mapped_progress, return_segments=want_segments)
+                text = transcribe_with_openai_api_path(local_input, cloud_model, mapped_progress, return_segments=want_segments, cancel_check=cancel_check)
+            # Detect cancellation result from cloud path
+            if isinstance(text, str) and text.strip().lower() == "cancelled":
+                raise RuntimeError("Cancelled")
             _update_job(job_id, status="Fertig", percent=100, result=text)
+
+            # Update DB on success
+            session2 = SessionLocal()
+            dbj = session2.get(TranscriptionJob, job_id)
+            if dbj:
+                dbj.status = "completed"
+                dbj.percent = 100
+                if isinstance(text, dict):
+                    dbj.result_text = text.get("text") or ""
+                    try:
+                        dbj.result_segments = json.dumps(text.get("segments") or [])
+                    except Exception:
+                        dbj.result_segments = None
+                else:
+                    dbj.result_text = str(text)
+                dbj.finished_at = datetime.utcnow()
+                try:
+                    dbj.duration_seconds = int(time.time() - start_ts)
+                except Exception:
+                    dbj.duration_seconds = None
+                session2.add(dbj)
+                session2.commit()
+            session2.close()
         except Exception as e:
             _update_job(job_id, status="Fehler", percent=100, error=str(e))
+            # Update DB on error/cancel
+            session3 = SessionLocal()
+            dbj = session3.get(TranscriptionJob, job_id)
+            if dbj:
+                cancelled = "Cancelled" in str(e) or (JOBS.get(job_id, {}).get("cancelled", False))
+                dbj.status = "cancelled" if cancelled else "error"
+                dbj.error = str(e)
+                dbj.finished_at = datetime.utcnow()
+                session3.add(dbj)
+                session3.commit()
+            session3.close()
         finally:
             # Clean up temp dir
             try:
@@ -574,6 +788,115 @@ def transcribe_status(job_id):
     if not job:
         return jsonify({"error": "unknown job id"}), 404
     return jsonify(job)
+
+
+@app.route("/jobs/active", methods=["GET"])
+def jobs_active():
+    # Return in-memory active jobs enriched with DB metadata
+    session = SessionLocal()
+    payload = []
+    with JOBS_LOCK:
+        for jid, j in JOBS.items():
+            status = j.get("status")
+            if status in ("Gestartet", "Lade Audio von URL…", "Fertig", "Fehler"):
+                # include all, UI can filter
+                pass
+            dbj = session.get(TranscriptionJob, jid)
+            payload.append({
+                "id": jid,
+                "status": j.get("status"),
+                "percent": j.get("percent", 0),
+                "error": j.get("error"),
+                "method": getattr(dbj, "method", None) if dbj else None,
+                "model": (dbj.cloud_model if dbj and dbj.method == "cloud" else (dbj.local_model_size if dbj else None)),
+                "source_type": getattr(dbj, "source_type", None) if dbj else None,
+                "source_url": getattr(dbj, "source_url", None) if dbj else None,
+                "started_at": (dbj.started_at.isoformat() + "Z") if (dbj and dbj.started_at) else None,
+                "user_email": getattr(dbj, "user_email", None) if dbj else None,
+            })
+    session.close()
+    return jsonify(payload)
+
+
+@app.route("/jobs/cancel/<job_id>", methods=["POST"])
+def jobs_cancel(job_id):
+    ok = _job_set_cancel(job_id)
+    if not ok:
+        return jsonify({"error": "unknown job id"}), 404
+    return jsonify({"ok": True})
+
+
+@app.route("/history/list", methods=["GET"])
+def history_list():
+    session = SessionLocal()
+    q = session.query(TranscriptionJob).filter(TranscriptionJob.status.in_(["completed", "error", "cancelled"]))
+    q = q.order_by(TranscriptionJob.finished_at.desc().nullslast(), TranscriptionJob.started_at.desc())
+    limit = int(request.args.get("limit", "100"))
+    items = q.limit(limit).all()
+    out = []
+    for it in items:
+        out.append({
+            "id": it.id,
+            "status": it.status,
+            "percent": it.percent,
+            "error": it.error,
+            "method": it.method,
+            "model": it.cloud_model if it.method == "cloud" else it.local_model_size,
+            "source_type": it.source_type,
+            "source_url": it.source_url,
+            "started_at": it.started_at.isoformat() + "Z" if it.started_at else None,
+            "finished_at": it.finished_at.isoformat() + "Z" if it.finished_at else None,
+            "duration_seconds": it.duration_seconds,
+            "text_len": len(it.result_text or ""),
+            "user_email": it.user_email,
+        })
+    session.close()
+    return jsonify(out)
+
+
+@app.route("/history/item/<job_id>", methods=["GET"])
+def history_item(job_id):
+    session = SessionLocal()
+    it = session.get(TranscriptionJob, job_id)
+    if not it:
+        session.close()
+        return jsonify({"error": "not found"}), 404
+    payload = {
+        "id": it.id,
+        "status": it.status,
+        "percent": it.percent,
+        "error": it.error,
+        "method": it.method,
+        "model": it.cloud_model if it.method == "cloud" else it.local_model_size,
+        "source_type": it.source_type,
+        "source_url": it.source_url,
+        "started_at": it.started_at.isoformat() + "Z" if it.started_at else None,
+        "finished_at": it.finished_at.isoformat() + "Z" if it.finished_at else None,
+        "duration_seconds": it.duration_seconds,
+        "text": it.result_text or "",
+        "segments": None,
+        "user_email": it.user_email,
+    }
+    try:
+        if it.result_segments:
+            payload["segments"] = json.loads(it.result_segments)
+    except Exception:
+        payload["segments"] = None
+    session.close()
+    return jsonify(payload)
+
+
+@app.route("/history/delete/<job_id>", methods=["POST", "DELETE"])
+def history_delete(job_id):
+    session = SessionLocal()
+    it = session.get(TranscriptionJob, job_id)
+    if not it:
+        session.close()
+        return jsonify({"error": "not found"}), 404
+    session.delete(it)
+    session.commit()
+    session.close()
+    return jsonify({"ok": True})
 
 # OpenAI API-compatible endpoint for transcriptions
 @app.route("/v1/audio/transcriptions", methods=["POST"])
@@ -616,6 +939,15 @@ def api_transcribe():
     except Exception as e:
         # Return error in JSON for consistency with OpenAI API
         return jsonify({"error": str(e)}), 500
+
+_DB_READY = False
+@app.before_request
+def _ensure_db_ready():
+    global _DB_READY
+    if not _DB_READY:
+        init_db()
+        _DB_READY = True
+
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0")
