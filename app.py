@@ -50,6 +50,8 @@ local_model = None
 current_model_size = None
 JOBS_LOCK = threading.Lock()
 JOBS = {}
+DB_INIT_LOCK = threading.Lock()
+_DB_READY = False
 
 
 class TranscriptionJob(Base):
@@ -90,6 +92,17 @@ def init_db():
 
 
 @app.before_request
+def _ensure_db_ready():
+    # Initialize the database on first request in a thread-safe manner
+    global _DB_READY
+    if not _DB_READY:
+        with DB_INIT_LOCK:
+            if not _DB_READY:
+                init_db()
+                _DB_READY = True
+
+
+@app.before_request
 def _cf_access_auth():
     # Set user context; enforce Cloudflare Access header for UI routes only (API remains unaffected)
     g.user_email = None
@@ -123,7 +136,6 @@ def _cf_access_auth():
             user.last_seen = now
         session.commit()
         session.close()
-
 def load_local_model(model_size="base"):
     global local_model, current_model_size
     if local_model is None or current_model_size != model_size:
@@ -1066,13 +1078,7 @@ def api_transcribe():
         # Return error in JSON for consistency with OpenAI API
         return jsonify({"error": str(e)}), 500
 
-_DB_READY = False
-@app.before_request
-def _ensure_db_ready():
-    global _DB_READY
-    if not _DB_READY:
-        init_db()
-        _DB_READY = True
+ 
 
 
 if __name__ == "__main__":
