@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Setup - Whisper Transcription</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/app.js"></script>
+</head>
+<body>
+    <div class="setup-container">
+        <div class="setup-card">
+            <div style="text-align: center; margin-bottom: 15px;">
+                <img src="/static/favicon.svg" alt="Logo" style="width: 56px; height: 56px;">
+            </div>
+            <h2 data-i18n="setup.title">Welcome to Whisper Transcription</h2>
+            <p class="subtitle" data-i18n="setup.subtitle">Let's set up your admin account to get started.</p>
+
+            <div class="setup-steps">
+                <div class="setup-step active">
+                    <div class="step-number">1</div>
+                    <span data-i18n="setup.step_account">Account</span>
+                </div>
+                <div class="setup-step">
+                    <div class="step-number">2</div>
+                    <span data-i18n="setup.step_complete">Complete</span>
+                </div>
+            </div>
+
+            <div id="error-message" class="alert alert-error hidden">
+                <i class="fas fa-exclamation-circle"></i>
+                <span id="error-text"></span>
+            </div>
+
+            <form id="setup-form">
+                <h3 style="margin-bottom: 15px;" data-i18n="setup.admin_account">Create Admin Account</h3>
+
+                <div class="form-group">
+                    <label for="email" data-i18n="setup.email">Email</label>
+                    <input type="email" id="email" name="email" required
+                           data-i18n-placeholder="setup.email_placeholder" placeholder="admin@example.com">
+                </div>
+
+                <div class="form-group">
+                    <label for="name" data-i18n="setup.name">Name (optional)</label>
+                    <input type="text" id="name" name="name"
+                           data-i18n-placeholder="setup.name_placeholder" placeholder="Your name">
+                </div>
+
+                <div class="form-group">
+                    <label for="password" data-i18n="setup.password">Password</label>
+                    <input type="password" id="password" name="password" required minlength="8"
+                           data-i18n-placeholder="setup.password_placeholder" placeholder="At least 8 characters">
+                </div>
+
+                <div class="form-group">
+                    <label for="password_confirm" data-i18n="setup.password_confirm">Confirm Password</label>
+                    <input type="password" id="password_confirm" name="password_confirm" required minlength="8"
+                           data-i18n-placeholder="setup.password_placeholder" placeholder="At least 8 characters">
+                </div>
+
+                <button type="submit" class="button" style="width: 100%;" id="submit-btn">
+                    <i class="fas fa-check"></i>
+                    <span data-i18n="setup.complete_setup">Complete Setup</span>
+                </button>
+            </form>
+        </div>
+
+        <div style="text-align: center; margin-top: 20px;">
+            <div class="theme-toggle" style="display: inline-flex;">
+                <button data-theme="light" title="Light mode">
+                    <i class="fas fa-sun"></i>
+                </button>
+                <button data-theme="dark" title="Dark mode">
+                    <i class="fas fa-moon"></i>
+                </button>
+                <button data-theme="auto" title="Auto (system)">
+                    <i class="fas fa-circle-half-stroke"></i>
+                </button>
+            </div>
+        </div>
+
+        <footer class="footer" style="position: fixed; bottom: 0; left: 0; right: 0;">
+            <div class="footer-content">
+                <span>Version {{ version }}</span>
+                <span></span>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        document.getElementById('setup-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const errorDiv = document.getElementById('error-message');
+            const errorText = document.getElementById('error-text');
+            const submitBtn = document.getElementById('submit-btn');
+
+            // Reset error
+            errorDiv.classList.add('hidden');
+
+            const email = document.getElementById('email').value.trim();
+            const name = document.getElementById('name').value.trim();
+            const password = document.getElementById('password').value;
+            const passwordConfirm = document.getElementById('password_confirm').value;
+
+            // Validation
+            if (!email) {
+                errorText.textContent = window.i18n ? window.i18n.t('setup.error_email') : 'Email is required';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+
+            if (password.length < 8) {
+                errorText.textContent = window.i18n ? window.i18n.t('setup.error_password') : 'Password must be at least 8 characters';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+
+            if (password !== passwordConfirm) {
+                errorText.textContent = window.i18n ? window.i18n.t('setup.error_password_match') : 'Passwords do not match';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+
+            // Disable button
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>Processing...</span>';
+
+            try {
+                const response = await fetch('/admin/setup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, name, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    // Update step indicator
+                    document.querySelectorAll('.setup-step')[0].classList.remove('active');
+                    document.querySelectorAll('.setup-step')[0].classList.add('completed');
+                    document.querySelectorAll('.setup-step')[1].classList.add('active');
+
+                    // Redirect to login
+                    window.location.href = data.redirect || '/login-access';
+                } else {
+                    errorText.textContent = data.error || 'Setup failed';
+                    errorDiv.classList.remove('hidden');
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="fas fa-check"></i> <span data-i18n="setup.complete_setup">Complete Setup</span>';
+                }
+            } catch (error) {
+                errorText.textContent = 'Connection error. Please try again.';
+                errorDiv.classList.remove('hidden');
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fas fa-check"></i> <span data-i18n="setup.complete_setup">Complete Setup</span>';
+            }
+        });
+    </script>
+</body>
+</html>

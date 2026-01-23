@@ -1,3 +1,7 @@
+"""
+Whisper API STT - Main Application
+A web app for audio transcription using local Whisper and OpenAI Cloud.
+"""
 import os
 import tempfile
 import json
@@ -9,41 +13,37 @@ import uuid
 import shutil
 import time
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, jsonify, Response, g
+
+from flask import Flask, render_template, request, jsonify, Response, g, redirect, url_for
 import requests
 import whisper
 from urllib.parse import urlparse
 import yt_dlp
-from sqlalchemy import create_engine, Column, String, Integer, Text, DateTime, Boolean
-from sqlalchemy.orm import sessionmaker, declarative_base
-
 from flask_cors import CORS
+
+# Import new modules
+from version import VERSION
+from models import (
+    TranscriptionJob, User, ApiKey, Session as DbSession,
+    SessionLocal, init_db, generate_uuid, DB_PATH, engine, Base
+)
+from config import (
+    get_setting, set_setting, SettingsManager,
+    is_auth_enabled, is_setup_completed
+)
+from auth import auth_bp, validate_api_key, login_required, admin_required
+from admin import admin_bp
+
+# Initialize Flask app
 app = Flask(__name__)
-# Enable CORS for all routes to allow external clients (e.g., Dictate) to communicate with this API
 CORS(app)
+
+# Register blueprints
+app.register_blueprint(auth_bp)
+app.register_blueprint(admin_bp)
+
+# Environment variables (only OPENAI_API_KEY remains as env var)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-LOCAL_API_KEY = os.getenv("LOCAL_API_KEY", None)  # Optional API key for local API
-DEFAULT_API_MODEL = "base"  # Default model for API requests
-
-# Database setup (SQLite by default; path configurable)
-DB_PATH = os.getenv("DB_PATH", "/data/app.db")
-engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
-Base = declarative_base()
-
-# Cloudflare Access enforcement
-CF_ACCESS_ENFORCE = os.getenv("CF_ACCESS_ENFORCE", "false").strip().lower() in ("1", "true", "yes", "on")
-
-# Cloud Upload Limits / Chunking Settings
-# Threshold in MB after which we split before sending to OpenAI API
-MAX_CLOUD_FILE_MB = float(os.getenv("MAX_CLOUD_FILE_MB", "20"))
-# Duration per chunk in seconds when splitting (kept small to stay well below size limits)
-CHUNK_DURATION_SECONDS = int(os.getenv("CHUNK_DURATION_SECONDS", "600"))  # 10 minutes
-# Re-encode audio when chunking to ensure predictable small chunk sizes
-REENCODE_BITRATE = os.getenv("REENCODE_BITRATE", "64k")  # audio bitrate
-
-# Job timeout (in seconds). Default: 12 hours
-JOB_TIMEOUT_SECONDS = int(os.getenv("JOB_TIMEOUT_SECONDS", str(12 * 3600)))
 
 if not OPENAI_API_KEY:
     print("Note: No OPENAI_API_KEY found. Cloud transcription will not be available.")
@@ -58,51 +58,15 @@ _DB_READY = False
 _WATCHDOG_STARTED = False
 
 
-class TranscriptionJob(Base):
-    __tablename__ = "transcription_jobs"
-    id = Column(String, primary_key=True)
-    user_email = Column(String, nullable=True)
-    source_type = Column(String, nullable=True)  # file|url
-    source_url = Column(Text, nullable=True)
-    original_filename = Column(String, nullable=True)
-    method = Column(String, nullable=False)  # local|cloud
-    local_model_size = Column(String, nullable=True)
-    cloud_model = Column(String, nullable=True)
-    with_timestamps = Column(Boolean, default=False)
-    status = Column(String, default="queued")  # queued|running|completed|error|cancelled
-    percent = Column(Integer, default=0)
-    error = Column(Text, nullable=True)
-    result_text = Column(Text, nullable=True)
-    result_segments = Column(Text, nullable=True)  # JSON string
-    started_at = Column(DateTime, nullable=True)
-    finished_at = Column(DateTime, nullable=True)
-    duration_seconds = Column(Integer, nullable=True)
-
-
-class User(Base):
-    __tablename__ = "users"
-    email = Column(String, primary_key=True)
-    is_admin = Column(Boolean, default=False)
-    first_seen = Column(DateTime, nullable=True)
-    last_seen = Column(DateTime, nullable=True)
-
-
-def init_db():
-    try:
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    except Exception:
-        pass
-    Base.metadata.create_all(engine)
-
-
 @app.before_request
 def _ensure_db_ready():
-    # Initialize the database on first request in a thread-safe manner
+    """Initialize the database on first request in a thread-safe manner."""
     global _DB_READY
     if not _DB_READY:
         with DB_INIT_LOCK:
             if not _DB_READY:
                 init_db()
+                SettingsManager.initialize()
                 _DB_READY = True
     # Start watchdog once
     global _WATCHDOG_STARTED
@@ -115,39 +79,81 @@ def _ensure_db_ready():
 
 
 @app.before_request
-def _cf_access_auth():
-    # Set user context; enforce Cloudflare Access header for UI routes only (API remains unaffected)
+def _auth_middleware():
+    """Handle authentication for each request."""
+    g.user = None
     g.user_email = None
-    hdr = request.headers.get("CF-Access-Authenticated-User-Email")
-    if hdr:
-        g.user_email = hdr
+    g.is_admin = False
 
     path = request.path or ""
 
-    # If CF auth is enforced, require header for UI and non-API routes
-    if CF_ACCESS_ENFORCE:
-        if not path.startswith("/v1/audio/transcriptions"):
-            if not g.user_email:
-                return jsonify({"error": "Unauthorized (Cloudflare Access required)."}), 401
+    # Skip auth for static files
+    if path.startswith('/static/'):
+        return None
 
-    # Persist or update user when CF is used and header present
-    if g.user_email:
-        session = SessionLocal()
-        user = session.get(User, g.user_email)
-        now = datetime.utcnow()
-        if not user:
-            # Create and maybe make first admin
-            user = User(email=g.user_email, is_admin=False, first_seen=now, last_seen=now)
-            session.add(user)
-            session.flush()
-            # If no admin exists, make this one admin
-            any_admin = session.query(User).filter(User.is_admin == True).first()
-            if not any_admin:
-                user.is_admin = True
-        else:
-            user.last_seen = now
-        session.commit()
-        session.close()
+    # Check if auth is enabled
+    if not is_auth_enabled():
+        # Auth disabled - allow anonymous access
+        return None
+
+    # Check for setup wizard redirect
+    if not is_setup_completed():
+        if not path.startswith('/admin/setup') and not path.startswith('/static/'):
+            return redirect(url_for('admin.setup_page'))
+
+    # Skip auth for login pages
+    if path in ['/login-access', '/auth/login', '/auth/oidc/authorize', '/auth/oidc/callback']:
+        return None
+
+    # API endpoint - check API key if required
+    if path.startswith('/v1/audio/transcriptions'):
+        if get_setting('api_key_required', False):
+            auth_header = request.headers.get('Authorization', '')
+            api_key = validate_api_key(auth_header)
+            if not api_key:
+                # Backward compatibility: check legacy LOCAL_API_KEY env var
+                legacy_key = os.getenv('LOCAL_API_KEY')
+                if legacy_key:
+                    if not auth_header.startswith('Bearer ') or auth_header.split(' ', 1)[1] != legacy_key:
+                        return jsonify({'error': 'Invalid API key'}), 401
+                else:
+                    return jsonify({'error': 'Invalid API key'}), 401
+        return None
+
+    # Try session authentication
+    from auth import SESSION_COOKIE_NAME, validate_session, get_or_create_header_user
+    session_id = request.cookies.get(SESSION_COOKIE_NAME + '_id')
+    session_token = request.cookies.get(SESSION_COOKIE_NAME + '_token')
+
+    if session_id and session_token:
+        user = validate_session(session_id, session_token)
+        if user:
+            g.user = user
+            g.user_email = user.email
+            g.is_admin = user.is_admin
+            return None
+
+    # Try HTTP header authentication
+    if get_setting('auth_http_header_enabled', False):
+        header_name = get_setting('auth_http_header_name', 'CF-Access-Authenticated-User-Email')
+        header_value = request.headers.get(header_name)
+        if header_value:
+            user = get_or_create_header_user(header_value)
+            if user:
+                g.user = user
+                g.user_email = user.email
+                g.is_admin = user.is_admin
+                return None
+
+    # Not authenticated - redirect based on default method
+    default_method = get_setting('auth_default_method', 'local')
+
+    if default_method == 'oidc' and get_setting('auth_oidc_enabled', False):
+        return redirect(url_for('auth.oidc_authorize'))
+    else:
+        return redirect(url_for('auth.login_page'))
+
+
 def load_local_model(model_size="base"):
     global local_model, current_model_size
     if local_model is None or current_model_size != model_size:
@@ -156,20 +162,24 @@ def load_local_model(model_size="base"):
         current_model_size = model_size
     return local_model
 
+
 def transcribe_with_local_model(audio_file, model_size="base", progress: Optional[Callable[[str, int], None]] = None, return_segments: bool = False):
-    # Wrapper für FileStorage -> Pfad
     with tempfile.NamedTemporaryFile(delete=True) as temp_file:
         audio_file.save(temp_file.name)
         return transcribe_local_from_path(temp_file.name, model_size, progress, return_segments)
 
 
 def transcribe_local_from_path(file_path: str, model_size="base", progress: Optional[Callable[[str, int], None]] = None, return_segments: bool = False, cancel_check: Optional[Callable[[], bool]] = None):
+    # Get settings
+    chunk_duration = get_setting('chunk_duration_seconds', 600)
+    reencode_bitrate = get_setting('reencode_bitrate', '64k')
+
     if progress:
-        progress("Lade lokales Whisper-Modell", 5)
+        progress("Loading local Whisper model", 5)
     model = load_local_model(model_size)
     if progress:
-        progress("Transkribiere lokal…", 10)
-    # For better cancellation responsiveness on large files, split into chunks if duration is long
+        progress("Transcribing locally...", 10)
+
     try:
         out = subprocess.check_output([
             "ffprobe", "-v", "error", "-show_entries", "format=duration",
@@ -179,25 +189,23 @@ def transcribe_local_from_path(file_path: str, model_size="base", progress: Opti
     except Exception:
         duration = 0.0
 
-    if duration and duration > CHUNK_DURATION_SECONDS * 1.5:
-        # Chunked local transcription with cancellation between chunks
+    if duration and duration > chunk_duration * 1.5:
         tmpdir = tempfile.mkdtemp(prefix="local_chunk_")
         try:
             out_pattern = os.path.join(tmpdir, "chunk_%03d.mp3")
             cmd = [
                 "ffmpeg", "-hide_banner", "-loglevel", "error",
                 "-i", file_path,
-                "-ac", "1", "-ar", "16000", "-b:a", REENCODE_BITRATE,
-                "-f", "segment", "-segment_time", str(CHUNK_DURATION_SECONDS),
+                "-ac", "1", "-ar", "16000", "-b:a", reencode_bitrate,
+                "-f", "segment", "-segment_time", str(chunk_duration),
                 "-reset_timestamps", "1",
                 out_pattern,
             ]
             subprocess.run(cmd, check=True)
         except Exception as e:
-            # Fallback to single-shot
             result = model.transcribe(file_path)
             if progress:
-                progress("Fertig", 100)
+                progress("Done", 100)
             text = result.get("text", "")
             if not return_segments:
                 return text
@@ -214,7 +222,7 @@ def transcribe_local_from_path(file_path: str, model_size="base", progress: Opti
         all_segments: List[dict] = []
         total = len(chunks) or 1
         cum_offset = 0.0
-        # gather durations
+
         durations = []
         for p in chunks:
             try:
@@ -224,17 +232,17 @@ def transcribe_local_from_path(file_path: str, model_size="base", progress: Opti
                 ], text=True)
                 durations.append(float(out.strip()))
             except Exception:
-                durations.append(float(CHUNK_DURATION_SECONDS))
+                durations.append(float(chunk_duration))
 
         for idx, ch in enumerate(chunks, start=1):
             if cancel_check and cancel_check():
                 if progress:
-                    progress("Abgebrochen", 100)
+                    progress("Cancelled", 100)
                 shutil.rmtree(tmpdir, ignore_errors=True)
                 raise RuntimeError("Cancelled")
             if progress:
                 percent = 10 + int(85 * (idx - 1) / total)
-                progress(f"Transkribiere Chunk {idx}/{total}", percent)
+                progress(f"Transcribing chunk {idx}/{total}", percent)
             r = model.transcribe(ch)
             parts.append((r.get("text") or "").strip())
             if return_segments:
@@ -247,20 +255,19 @@ def transcribe_local_from_path(file_path: str, model_size="base", progress: Opti
             try:
                 cum_offset += float(durations[idx-1] or 0.0)
             except Exception:
-                cum_offset += float(CHUNK_DURATION_SECONDS)
+                cum_offset += float(chunk_duration)
         merged = "\n\n".join([p for p in parts if p])
         if progress:
-            progress("Fertig", 100)
+            progress("Done", 100)
         if not return_segments:
             shutil.rmtree(tmpdir, ignore_errors=True)
             return merged
         shutil.rmtree(tmpdir, ignore_errors=True)
         return {"text": merged, "segments": all_segments or None}
 
-    # Small files: single-shot
     result = model.transcribe(file_path)
     if progress:
-        progress("Fertig", 100)
+        progress("Done", 100)
     text = result.get("text", "")
     if not return_segments:
         return text
@@ -270,12 +277,12 @@ def transcribe_local_from_path(file_path: str, model_size="base", progress: Opti
     ]
     return {"text": text, "segments": segments}
 
+
 def transcribe_with_openai_api(audio_file, model="whisper-1", progress: Optional[Callable[[str, int], None]] = None, return_segments: bool = False):
     valid_models = ["whisper-1", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"]
     if model not in valid_models:
-        model = "whisper-1"  # Default to whisper-1 if invalid model
-    # Save uploaded file and delegate to path-based function
-    with tempfile.NamedTemporaryDirectory() as tmpdir:
+        model = "whisper-1"
+    with tempfile.TemporaryDirectory() as tmpdir:
         orig_ext = os.path.splitext(audio_file.filename or "")[1] or ".bin"
         input_path = os.path.join(tmpdir, f"input{orig_ext}")
         audio_file.save(input_path)
@@ -287,20 +294,22 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
     if model not in valid_models:
         model = "whisper-1"
 
+    # Get settings
+    max_cloud_file_mb = get_setting('max_cloud_file_mb', 20)
+    chunk_duration = get_setting('chunk_duration_seconds', 600)
+    reencode_bitrate = get_setting('reencode_bitrate', '64k')
+
     file_size_bytes = os.path.getsize(input_path)
     size_mb = file_size_bytes / (1024 * 1024)
 
     def _send_to_openai(file_path: str, override_content_type: str = None, want_verbose: bool = False) -> dict:
         ct = override_content_type or (mimetypes.guess_type(file_path)[0] or "application/octet-stream")
         if progress:
-            progress(f"Sende an OpenAI: {os.path.basename(file_path)}", 0)
-        # Build form data as list of tuples to support repeated fields
+            progress(f"Sending to OpenAI: {os.path.basename(file_path)}", 0)
         data_fields = [("model", model)]
         if want_verbose:
             data_fields.append(("response_format", "verbose_json"))
-            # Newer GPT-4o transcription models require explicit timestamp granularity
             if model.startswith("gpt-4o"):
-                # Request both word and segment to maximize compatibility
                 data_fields.append(("timestamp_granularities[]", "segment"))
                 data_fields.append(("timestamp_granularities[]", "word"))
         with open(file_path, "rb") as f:
@@ -315,7 +324,6 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
                 return response.json()
             except Exception:
                 return {"__error__": "Invalid JSON"}
-        # Retry without verbose if requested and failed
         if want_verbose:
             with open(file_path, "rb") as f2:
                 resp2 = requests.post(
@@ -332,7 +340,6 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
     def _extract_segments(api_resp: dict):
         if not isinstance(api_resp, dict):
             return None
-        # 1) Whisper-style verbose_json
         segs = api_resp.get("segments")
         if isinstance(segs, list) and segs:
             out = []
@@ -346,7 +353,6 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
                 except Exception:
                     continue
             return out or None
-        # 2) Some GPT-4o responses may include a 'timestamps' top-level list
         ts = api_resp.get("timestamps")
         if isinstance(ts, list) and ts:
             out = []
@@ -360,7 +366,6 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
                 except Exception:
                     continue
             return out or None
-        # 3) Nested structure: { timestamps: { segments: [...] } }
         tss = api_resp.get("timestamps")
         if isinstance(tss, dict):
             segs2 = tss.get("segments")
@@ -376,7 +381,6 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
                     except Exception:
                         continue
                 return out or None
-        # 4) Fallback: word-level timestamps only -> map words to pseudo-segments per word
         words = api_resp.get("words")
         if isinstance(words, list) and words:
             out = []
@@ -402,32 +406,30 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
         except Exception:
             return 0.0
 
-    # Small file: direct upload
-    if size_mb <= MAX_CLOUD_FILE_MB:
+    if size_mb <= max_cloud_file_mb:
         if progress:
-            progress("Direkt-Upload zu OpenAI", 10)
+            progress("Direct upload to OpenAI", 10)
         resp = _send_to_openai(input_path, want_verbose=return_segments)
         if "__error__" in resp:
             return f"Transcription error: {resp['__error__']}"
         if progress:
-            progress("Fertig", 100)
+            progress("Done", 100)
         text = resp.get("text", "")
         if not return_segments:
             return text or "No transcription found."
         segments = _extract_segments(resp)
         return {"text": text or "No transcription found.", "segments": segments}
 
-    # Large file: split into chunks and transcribe sequentially
     if progress:
-        progress("Datei zu groß – segmentiere Audio…", 5)
+        progress("File too large - segmenting audio...", 5)
     tmpdir = tempfile.mkdtemp(prefix="chunk_")
     try:
         out_pattern = os.path.join(tmpdir, "chunk_%03d.mp3")
         cmd = [
             "ffmpeg", "-hide_banner", "-loglevel", "error",
             "-i", input_path,
-            "-ac", "1", "-ar", "16000", "-b:a", REENCODE_BITRATE,
-            "-f", "segment", "-segment_time", str(CHUNK_DURATION_SECONDS),
+            "-ac", "1", "-ar", "16000", "-b:a", reencode_bitrate,
+            "-f", "segment", "-segment_time", str(chunk_duration),
             "-reset_timestamps", "1",
             out_pattern,
         ]
@@ -457,8 +459,8 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
         if cancel_check and cancel_check():
             return "Cancelled"
         if progress:
-            percent = 10 + int(85 * (idx - 1) / total)  # 10-95% über Chunks
-            progress(f"Transkribiere Chunk {idx}/{total}", percent)
+            percent = 10 + int(85 * (idx - 1) / total)
+            progress(f"Transcribing chunk {idx}/{total}", percent)
         resp = _send_to_openai(chunk_path, override_content_type="audio/mpeg", want_verbose=return_segments)
         if "__error__" in resp:
             return f"Transcription error on chunk {idx}/{total}: {resp['__error__']}"
@@ -472,12 +474,11 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
             if chunk_durations and len(chunk_durations) >= idx:
                 cumulative_offset += float(chunk_durations[idx-1] or 0.0)
             else:
-                cumulative_offset += float(CHUNK_DURATION_SECONDS)
+                cumulative_offset += float(chunk_duration)
 
     merged = "\n\n".join([p for p in parts if p])
     if progress:
-        progress("Fertig", 100)
-    # Clean up chunk dir
+        progress("Done", 100)
     shutil.rmtree(tmpdir, ignore_errors=True)
     if not return_segments:
         return merged or "No transcription found."
@@ -491,14 +492,9 @@ def _is_supported_media_url(url: str) -> bool:
             return False
         host = (parsed.netloc or "").lower()
         allowed_hosts = (
-            "youtube.com",
-            "www.youtube.com",
-            "m.youtube.com",
-            "music.youtube.com",
-            "youtu.be",
-            "www.youtu.be",
-            "twitch.tv",
-            "www.twitch.tv",
+            "youtube.com", "www.youtube.com", "m.youtube.com",
+            "music.youtube.com", "youtu.be", "www.youtu.be",
+            "twitch.tv", "www.twitch.tv",
         )
         return any(host.endswith(h) for h in allowed_hosts)
     except Exception:
@@ -506,15 +502,10 @@ def _is_supported_media_url(url: str) -> bool:
 
 
 def download_audio_from_url(media_url: str, dest_dir: str, progress: Optional[Callable[[str, int], None]] = None) -> str:
-    """
-    Download audio from a supported media URL (YouTube/Twitch) using yt-dlp.
-    Returns the path to the extracted audio file (mp3).
-    """
     if not _is_supported_media_url(media_url):
         raise ValueError("Only YouTube or Twitch URLs are supported.")
 
     os.makedirs(dest_dir, exist_ok=True)
-    # We use a fixed basename so we can predict the postprocessed output.
     outtmpl = os.path.join(dest_dir, "download.%(ext)s")
     last_percent = 0
 
@@ -527,15 +518,14 @@ def download_audio_from_url(media_url: str, dest_dir: str, progress: Optional[Ca
                 pct = 0
                 if total:
                     pct = int(downloaded / total * 100)
-                # Map 0-100 download to 0-30 overall
                 mapped = min(30, max(0, int(pct * 0.30)))
                 if mapped != last_percent:
                     last_percent = mapped
                     if progress:
-                        progress(f"Lade Audio… {pct}%", mapped)
+                        progress(f"Downloading audio... {pct}%", mapped)
             elif d.get('status') == 'finished':
                 if progress:
-                    progress("Download abgeschlossen – extrahiere Audio…", 30)
+                    progress("Download complete - extracting audio...", 30)
         except Exception:
             pass
 
@@ -549,28 +539,24 @@ def download_audio_from_url(media_url: str, dest_dir: str, progress: Optional[Ca
             'preferredcodec': 'mp3',
             'preferredquality': '128',
         }],
-        # Reduce noisy output
         'quiet': True,
         'no_warnings': True,
     }
 
-    # Run download
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([media_url])
     except Exception as e:
         raise RuntimeError(f"Download failed: {str(e)}")
 
-    # After postprocessing, expected file is download.mp3 in dest_dir
     final_path = os.path.join(dest_dir, "download.mp3")
     if not os.path.isfile(final_path):
-        # Fallback: pick the newest audio file in dest_dir
         candidates = [
             os.path.join(dest_dir, f) for f in os.listdir(dest_dir)
             if f.lower().endswith(('.mp3', '.m4a', '.aac', '.wav', '.ogg', '.webm'))
         ]
         if not candidates:
-            raise RuntimeError("Audio extraction failed – no audio file produced.")
+            raise RuntimeError("Audio extraction failed - no audio file produced.")
         final_path = max(candidates, key=lambda p: os.path.getmtime(p))
     return final_path
 
@@ -588,6 +574,7 @@ def _update_job(job_id: str, status: str = None, percent: int = None, result: st
             job["error"] = error
         JOBS[job_id] = job
 
+
 def _job_set_cancel(job_id: str):
     with JOBS_LOCK:
         job = JOBS.get(job_id)
@@ -603,7 +590,9 @@ def _make_progress_cb(job_id: str) -> Callable[[str, int], None]:
         _update_job(job_id, status=status, percent=percent)
     return cb
 
+
 def _watchdog_loop():
+    job_timeout = get_setting('job_timeout_seconds', 43200)
     while True:
         try:
             now_ts = time.time()
@@ -611,12 +600,11 @@ def _watchdog_loop():
             with JOBS_LOCK:
                 for jid, j in JOBS.items():
                     started = j.get("started_ts") or 0
-                    if started and (now_ts - started) > JOB_TIMEOUT_SECONDS:
+                    if started and (now_ts - started) > job_timeout:
                         timed_out_ids.append(jid)
             for jid in timed_out_ids:
                 _job_set_cancel(jid)
-                _update_job(jid, status="Timeout – Abbruch", percent=100)
-                # Mark DB as cancelled if still running
+                _update_job(jid, status="Timeout - Cancelled", percent=100)
                 session = SessionLocal()
                 dbj = session.get(TranscriptionJob, jid)
                 if dbj and dbj.status in ("running", "queued"):
@@ -630,41 +618,54 @@ def _watchdog_loop():
             pass
         time.sleep(30)
 
+
+def _is_current_user_admin() -> bool:
+    if g.get('user'):
+        return g.user.is_admin
+    if not getattr(g, "user_email", None):
+        return False
+    session = SessionLocal()
+    u = session.query(User).filter(User.email == g.user_email).first()
+    session.close()
+    return bool(u and u.is_admin)
+
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     transcription = None
-    transcription_method = "local"  # Default method is local
-    local_model_size = "base"       # Default local model
-    cloud_model = "whisper-1"       # Default cloud model
+    transcription_method = "local"
+    local_model_size = "base"
+    cloud_model = "whisper-1"
     cloud_available = OPENAI_API_KEY is not None
-    
+
     if request.method == "POST":
         transcription_method = request.form.get("transcription_method", "local")
         local_model_size = request.form.get("local_model_size", "base")
         cloud_model = request.form.get("cloud_model", "whisper-1")
-        
+
         if request.form.get("action") == "save_settings":
-            # Save API model setting
-            global DEFAULT_API_MODEL
-            DEFAULT_API_MODEL = request.form.get("api_model", "base")
+            set_setting('api_default_model', request.form.get("api_model", "base"),
+                       g.user.email if g.get('user') else None)
             return render_template(
-                "index.html", 
-                transcription=transcription, 
+                "index.html",
+                transcription=transcription,
                 selected_method=transcription_method,
                 local_model_size=local_model_size,
                 cloud_model=cloud_model,
-                api_model=DEFAULT_API_MODEL,
+                api_model=get_setting('api_default_model', 'base'),
                 cloud_available=cloud_available,
-                settings_saved=True
+                settings_saved=True,
+                version=VERSION,
+                user=g.get('user'),
+                auth_enabled=is_auth_enabled()
             )
-        
+
         media_url = (request.form.get("media_url") or "").strip()
         file = request.files.get("audio_file")
         if (not file or file.filename == "") and not media_url:
             transcription = "No file or URL provided!"
         else:
             try:
-                # Prepare a temp path from either file upload or URL download
                 with tempfile.TemporaryDirectory() as temp_dir:
                     input_path = None
                     if media_url:
@@ -677,7 +678,7 @@ def index():
 
                     if transcription_method == "local":
                         result = transcribe_local_from_path(input_path, local_model_size, return_segments=False)
-                    else:  # cloud
+                    else:
                         if not OPENAI_API_KEY:
                             transcription = "Error: No API key configured for cloud transcription!"
                         else:
@@ -685,23 +686,24 @@ def index():
                     transcription = result if isinstance(result, str) else result.get("text", "")
             except Exception as e:
                 transcription = f"Transcription error: {str(e)}"
-    
+
     return render_template(
-        "index.html", 
-        transcription=transcription, 
+        "index.html",
+        transcription=transcription,
         selected_method=transcription_method,
         local_model_size=local_model_size,
         cloud_model=cloud_model,
-        api_model=DEFAULT_API_MODEL,
+        api_model=get_setting('api_default_model', 'base'),
         cloud_available=cloud_available,
-        cf_enforced=CF_ACCESS_ENFORCE,
-        current_user_email=getattr(g, "user_email", None),
-        user_is_admin=_is_current_user_admin()
+        version=VERSION,
+        user=g.get('user'),
+        auth_enabled=is_auth_enabled(),
+        is_admin=_is_current_user_admin()
     )
-    
+
+
 @app.route("/transcribe", methods=["POST"])
 def transcribe_ajax():
-    transcription = None
     transcription_method = request.form.get("transcription_method", "local")
     local_model_size = request.form.get("local_model_size", "base")
     cloud_model = request.form.get("cloud_model", "whisper-1")
@@ -728,7 +730,6 @@ def transcribe_ajax():
             else:
                 if not OPENAI_API_KEY:
                     return jsonify({"error": "Error: No API key configured for cloud transcription!"}), 400
-                # gpt-4o(-mini)-transcribe liefert derzeit keine Timestamps -> ignorieren
                 if cloud_model.startswith("gpt-4o"):
                     with_timestamps = False
                 result = transcribe_with_openai_api_path(input_path, cloud_model, return_segments=with_timestamps)
@@ -739,7 +740,6 @@ def transcribe_ajax():
     return jsonify({"transcription": str(result), "segments": None})
 
 
-# Async job-based transcription start (for progress UI)
 @app.route("/transcribe_start", methods=["POST"])
 def transcribe_start():
     transcription_method = request.form.get("transcription_method", "local")
@@ -752,24 +752,24 @@ def transcribe_start():
     if (not file or file.filename == "") and not media_url:
         return jsonify({"error": "No file or URL provided!"}), 400
 
-    # Persist file to temp dir for background processing
     temp_dir = tempfile.mkdtemp(prefix="job_")
     input_path = os.path.join(temp_dir, (file.filename if file and file.filename else "audio.mp3"))
-    if media_url:
-        # We'll download within the worker to report progress
-        pass
-    else:
+    if not media_url and file:
         file.save(input_path)
 
     job_id = str(uuid.uuid4())
     with JOBS_LOCK:
-        JOBS[job_id] = {"status": "Gestartet", "percent": 0, "cancelled": False, "started_ts": time.time()}
+        JOBS[job_id] = {"status": "Started", "percent": 0, "cancelled": False, "started_ts": time.time()}
 
-    # Create DB entry
+    # Get user info
+    user_id = g.user.id if g.get('user') else None
+    user_email = g.user.email if g.get('user') else (getattr(g, 'user_email', None) or None)
+
     session = SessionLocal()
     db_job = TranscriptionJob(
         id=job_id,
-        user_email=(getattr(g, "user_email", None) or None),
+        user_id=user_id,
+        user_email=user_email,
         source_type=("url" if media_url else "file"),
         source_url=(media_url or None),
         original_filename=(os.path.basename(input_path) if (file and file.filename) else None),
@@ -790,16 +790,13 @@ def transcribe_start():
             progress_cb = _make_progress_cb(job_id)
             local_input = input_path
             if media_url:
-                # Download first with progress 0-30
-                _update_job(job_id, status="Lade Audio von URL…", percent=1)
+                _update_job(job_id, status="Downloading audio from URL...", percent=1)
                 try:
                     local_input = download_audio_from_url(media_url, temp_dir, progress_cb)
                 except Exception as de:
                     raise RuntimeError(str(de))
 
-            # Now transcribe (map internal progress to 30-100)
             def mapped_progress(status: str, pct: int):
-                # pct in 0..100 -> 30..100
                 mapped = 30 + int(max(0, min(100, pct)) * 0.70)
                 _update_job(job_id, status=status, percent=mapped)
 
@@ -813,15 +810,12 @@ def transcribe_start():
             else:
                 if not OPENAI_API_KEY:
                     raise RuntimeError("No API key configured for cloud transcription!")
-                # gpt-4o(-mini)-transcribe liefert derzeit keine Timestamps -> ignorieren
                 want_segments = with_timestamps and not cloud_model.startswith("gpt-4o")
                 text = transcribe_with_openai_api_path(local_input, cloud_model, mapped_progress, return_segments=want_segments, cancel_check=cancel_check)
-            # Detect cancellation result from cloud path
             if isinstance(text, str) and text.strip().lower() == "cancelled":
                 raise RuntimeError("Cancelled")
-            _update_job(job_id, status="Fertig", percent=100, result=text)
+            _update_job(job_id, status="Done", percent=100, result=text)
 
-            # Update DB on success
             session2 = SessionLocal()
             dbj = session2.get(TranscriptionJob, job_id)
             if dbj:
@@ -844,8 +838,7 @@ def transcribe_start():
                 session2.commit()
             session2.close()
         except Exception as e:
-            _update_job(job_id, status="Fehler", percent=100, error=str(e))
-            # Update DB on error/cancel
+            _update_job(job_id, status="Error", percent=100, error=str(e))
             session3 = SessionLocal()
             dbj = session3.get(TranscriptionJob, job_id)
             if dbj:
@@ -857,7 +850,6 @@ def transcribe_start():
                 session3.commit()
             session3.close()
         finally:
-            # Clean up temp dir
             try:
                 shutil.rmtree(temp_dir, ignore_errors=True)
             except Exception:
@@ -870,24 +862,25 @@ def transcribe_start():
 
 @app.route("/transcribe_status/<job_id>", methods=["GET"])
 def transcribe_status(job_id):
-    # Try in-memory first
     with JOBS_LOCK:
         job = JOBS.get(job_id)
-    # Always fetch DB to enforce permissions and build fallback
     session = SessionLocal()
     dbj = session.get(TranscriptionJob, job_id)
     session.close()
     if not dbj and not job:
         return jsonify({"error": "unknown job id"}), 404
-    # Permission: non-admins can only see their own jobs
+
     if not _is_current_user_admin():
-        owner = getattr(dbj, "user_email", None) if dbj else None
-        if owner and owner != getattr(g, "user_email", None):
-            return jsonify({"error": "forbidden"}), 403
-    # If in-memory exists, prefer that
+        owner_id = getattr(dbj, "user_id", None) if dbj else None
+        owner_email = getattr(dbj, "user_email", None) if dbj else None
+        current_id = g.user.id if g.get('user') else None
+        current_email = g.user.email if g.get('user') else getattr(g, 'user_email', None)
+        if owner_id and owner_id != current_id:
+            if owner_email and owner_email != current_email:
+                return jsonify({"error": "forbidden"}), 403
+
     if job:
         return jsonify(job)
-    # Fallback: build status from DB so UI can complete and render
     resp = {
         "status": None,
         "percent": getattr(dbj, "percent", 0) if dbj else 0,
@@ -896,9 +889,8 @@ def transcribe_status(job_id):
     }
     if dbj:
         if dbj.status == "completed":
-            resp["status"] = "Fertig"
+            resp["status"] = "Done"
             resp["percent"] = 100
-            # Build result object to match UI expectations
             segs = None
             try:
                 if dbj.result_segments:
@@ -907,32 +899,31 @@ def transcribe_status(job_id):
                 segs = None
             resp["result"] = {"text": dbj.result_text or "", "segments": segs}
         elif dbj.status in ("error", "cancelled"):
-            resp["status"] = "Fehler" if dbj.status == "error" else "Abgebrochen"
+            resp["status"] = "Error" if dbj.status == "error" else "Cancelled"
             resp["percent"] = 100
             resp["error"] = dbj.error or ("Cancelled" if dbj.status == "cancelled" else "Error")
         else:
-            # running/queued but not in memory -> minimal running state
-            resp["status"] = "Läuft…"
+            resp["status"] = "Running..."
             resp["percent"] = int(dbj.percent or 0)
     return jsonify(resp)
 
 
 @app.route("/jobs/active", methods=["GET"])
 def jobs_active():
-    # Return in-memory active jobs enriched with DB metadata; filter by user if not admin
     session = SessionLocal()
     payload = []
     is_admin = _is_current_user_admin()
-    current = getattr(g, "user_email", None)
+    current_id = g.user.id if g.get('user') else None
+    current_email = g.user.email if g.get('user') else getattr(g, 'user_email', None)
     with JOBS_LOCK:
         for jid, j in list(JOBS.items()):
             dbj = session.get(TranscriptionJob, jid)
-            # Only show running jobs
             if not dbj or dbj.status not in ("running", "queued"):
                 continue
             if not is_admin:
-                if dbj.user_email and dbj.user_email != current:
-                    continue
+                if dbj.user_id and dbj.user_id != current_id:
+                    if dbj.user_email and dbj.user_email != current_email:
+                        continue
             payload.append({
                 "id": jid,
                 "status": j.get("status"),
@@ -951,18 +942,19 @@ def jobs_active():
 
 @app.route("/jobs/cancel/<job_id>", methods=["POST"])
 def jobs_cancel(job_id):
-    # Permission check: only owner or admin can cancel
     session = SessionLocal()
     dbj = session.get(TranscriptionJob, job_id)
     session.close()
     if not _is_current_user_admin():
-        if dbj and dbj.user_email and dbj.user_email != getattr(g, "user_email", None):
-            return jsonify({"error": "forbidden"}), 403
+        current_id = g.user.id if g.get('user') else None
+        current_email = g.user.email if g.get('user') else getattr(g, 'user_email', None)
+        if dbj and dbj.user_id and dbj.user_id != current_id:
+            if dbj.user_email and dbj.user_email != current_email:
+                return jsonify({"error": "forbidden"}), 403
     ok = _job_set_cancel(job_id)
     if not ok:
         return jsonify({"error": "unknown job id"}), 404
-    # Update visible status immediately
-    _update_job(job_id, status="Abbruch angefordert", percent=None)
+    _update_job(job_id, status="Cancel requested", percent=None)
     return jsonify({"ok": True})
 
 
@@ -971,7 +963,12 @@ def history_list():
     session = SessionLocal()
     q = session.query(TranscriptionJob).filter(TranscriptionJob.status.in_(["completed", "error", "cancelled"]))
     if not _is_current_user_admin():
-        q = q.filter(TranscriptionJob.user_email == getattr(g, "user_email", None))
+        current_id = g.user.id if g.get('user') else None
+        current_email = g.user.email if g.get('user') else getattr(g, 'user_email', None)
+        if current_id:
+            q = q.filter((TranscriptionJob.user_id == current_id) | (TranscriptionJob.user_email == current_email))
+        elif current_email:
+            q = q.filter(TranscriptionJob.user_email == current_email)
     q = q.order_by(TranscriptionJob.finished_at.desc().nullslast(), TranscriptionJob.started_at.desc())
     limit = int(request.args.get("limit", "100"))
     items = q.limit(limit).all()
@@ -1004,9 +1001,12 @@ def history_item(job_id):
         session.close()
         return jsonify({"error": "not found"}), 404
     if not _is_current_user_admin():
-        if it.user_email and it.user_email != getattr(g, "user_email", None):
-            session.close()
-            return jsonify({"error": "forbidden"}), 403
+        current_id = g.user.id if g.get('user') else None
+        current_email = g.user.email if g.get('user') else getattr(g, 'user_email', None)
+        if it.user_id and it.user_id != current_id:
+            if it.user_email and it.user_email != current_email:
+                session.close()
+                return jsonify({"error": "forbidden"}), 403
     payload = {
         "id": it.id,
         "status": it.status,
@@ -1040,47 +1040,46 @@ def history_delete(job_id):
         session.close()
         return jsonify({"error": "not found"}), 404
     if not _is_current_user_admin():
-        if it.user_email and it.user_email != getattr(g, "user_email", None):
-            session.close()
-            return jsonify({"error": "forbidden"}), 403
+        current_id = g.user.id if g.get('user') else None
+        current_email = g.user.email if g.get('user') else getattr(g, 'user_email', None)
+        if it.user_id and it.user_id != current_id:
+            if it.user_email and it.user_email != current_email:
+                session.close()
+                return jsonify({"error": "forbidden"}), 403
     session.delete(it)
     session.commit()
     session.close()
     return jsonify({"ok": True})
 
 
-def _is_current_user_admin() -> bool:
-    if not getattr(g, "user_email", None):
-        return False
-    session = SessionLocal()
-    u = session.get(User, g.user_email)
-    session.close()
-    return bool(u and u.is_admin)
-
-
 @app.route("/users/list", methods=["GET"])
 def users_list():
-    if not CF_ACCESS_ENFORCE:
-        return jsonify({"error": "Cloudflare auth not enabled"}), 400
+    if not is_auth_enabled():
+        return jsonify({"error": "Authentication not enabled"}), 400
     if not _is_current_user_admin():
-        # Non-admins can see themselves only
-        session = SessionLocal()
-        me = session.get(User, getattr(g, "user_email", None))
-        session.close()
-        if not me:
-            return jsonify([])
-        return jsonify([{ "email": me.email, "is_admin": bool(me.is_admin),
-                          "first_seen": me.first_seen.isoformat()+"Z" if me.first_seen else None,
-                          "last_seen": me.last_seen.isoformat()+"Z" if me.last_seen else None }])
+        if g.get('user'):
+            return jsonify([{
+                "id": g.user.id,
+                "email": g.user.email,
+                "name": g.user.name,
+                "is_admin": g.user.is_admin,
+                "source": g.user.source,
+                "first_seen": g.user.first_seen.isoformat() + "Z" if g.user.first_seen else None,
+                "last_seen": g.user.last_seen.isoformat() + "Z" if g.user.last_seen else None
+            }])
+        return jsonify([])
     session = SessionLocal()
-    users = session.query(User).order_by(User.first_seen.asc().nullsfirst()).all()
+    users = session.query(User).order_by(User.created_at.asc().nullsfirst()).all()
     out = []
     for u in users:
         out.append({
+            "id": u.id,
             "email": u.email,
+            "name": u.name,
             "is_admin": bool(u.is_admin),
-            "first_seen": u.first_seen.isoformat()+"Z" if u.first_seen else None,
-            "last_seen": u.last_seen.isoformat()+"Z" if u.last_seen else None,
+            "source": u.source,
+            "first_seen": u.first_seen.isoformat() + "Z" if u.first_seen else None,
+            "last_seen": u.last_seen.isoformat() + "Z" if u.last_seen else None,
         })
     session.close()
     return jsonify(out)
@@ -1088,8 +1087,8 @@ def users_list():
 
 @app.route("/users/toggle_admin", methods=["POST"])
 def users_toggle_admin():
-    if not CF_ACCESS_ENFORCE:
-        return jsonify({"error": "Cloudflare auth not enabled"}), 400
+    if not is_auth_enabled():
+        return jsonify({"error": "Authentication not enabled"}), 400
     if not _is_current_user_admin():
         return jsonify({"error": "forbidden"}), 403
     data = request.get_json(silent=True) or {}
@@ -1097,11 +1096,10 @@ def users_toggle_admin():
     if not email:
         return jsonify({"error": "missing email"}), 400
     session = SessionLocal()
-    u = session.get(User, email)
+    u = session.query(User).filter(User.email == email).first()
     if not u:
         session.close()
         return jsonify({"error": "not found"}), 404
-    # Prevent demoting the last admin
     if u.is_admin:
         admins = session.query(User).filter(User.is_admin == True).all()
         if len(admins) <= 1:
@@ -1113,31 +1111,21 @@ def users_toggle_admin():
     session.close()
     return jsonify({"ok": True, "email": email, "is_admin": u.is_admin})
 
-# OpenAI API-compatible endpoint for transcriptions
+
 @app.route("/v1/audio/transcriptions", methods=["POST"])
 def api_transcribe():
-    # Check API key if configured
-    if LOCAL_API_KEY:
-        auth_header = request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer ") or auth_header.split(" ")[1] != LOCAL_API_KEY:
-            return jsonify({"error": "Invalid API key"}), 401
-    
-    # Check audio file
+    # API key check is handled by middleware
     if "file" not in request.files:
         return jsonify({"error": "No audio file submitted"}), 400
-    
+
     file = request.files["file"]
-    # Check if this is a request for whisper-1 compatibility
-    requested_model = request.form.get("model", DEFAULT_API_MODEL)
-    
-    # For OpenAI API compatibility, map whisper-1 to the configured default model
+    requested_model = request.form.get("model", get_setting('api_default_model', 'base'))
+
     if requested_model == "whisper-1":
-        model_size = DEFAULT_API_MODEL
+        model_size = get_setting('api_default_model', 'base')
     else:
-        # For direct local model specification (tiny, base, small, medium, large)
         model_size = requested_model
-    
-    # Determine desired response format (json or plain text)
+
     response_format = request.form.get("response_format", "json").lower()
     try:
         want_verbose = response_format == "verbose_json"
@@ -1149,14 +1137,10 @@ def api_transcribe():
                 return jsonify({"text": result.get("text", ""), "segments": result.get("segments") or []})
             else:
                 return jsonify({"text": result, "segments": []})
-        # Default to JSON format
         return jsonify({"text": result if isinstance(result, str) else result.get("text", "")})
     except Exception as e:
-        # Return error in JSON for consistency with OpenAI API
         return jsonify({"error": str(e)}), 500
-
- 
 
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0")
+    app.run(debug=True, host="0.0.0.0", port=5001)

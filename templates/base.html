@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Whisper Transcription{% endblock %}</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/app.js"></script>
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar">
+        <a href="/" class="navbar-brand">
+            <img src="/static/favicon.svg" alt="Logo">
+            <span data-i18n="app.title">Whisper Transcription</span>
+        </a>
+
+        <div class="navbar-controls">
+            {% if user %}
+            <div class="user-info">
+                <div class="user-avatar">{{ user.email[0]|upper }}</div>
+                <span>{{ user.name or user.email }}</span>
+            </div>
+            {% endif %}
+
+            <div class="theme-toggle">
+                <button data-theme="light" title="Light mode">
+                    <i class="fas fa-sun"></i>
+                </button>
+                <button data-theme="dark" title="Dark mode">
+                    <i class="fas fa-moon"></i>
+                </button>
+                <button data-theme="auto" title="Auto (system)">
+                    <i class="fas fa-circle-half-stroke"></i>
+                </button>
+            </div>
+
+            {% if auth_enabled and user %}
+            <button class="button secondary sm" data-action="logout">
+                <i class="fas fa-sign-out-alt"></i>
+                <span data-i18n="auth.logout">Logout</span>
+            </button>
+            {% endif %}
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-content">
+            <span><span data-i18n="footer.version">Version</span> {{ version }}</span>
+            <span></span>
+        </div>
+    </footer>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

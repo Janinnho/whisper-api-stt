@@ -1,0 +1,686 @@
+{% extends "base.html" %}
+
+{% block title %}Admin - Whisper Transcription{% endblock %}
+
+{% block content %}
+<div class="tabs">
+    <button class="tab active" onclick="openAdminTab(event, 'admin-dashboard')">
+        <i class="fas fa-tachometer-alt"></i> <span data-i18n="admin.dashboard">Dashboard</span>
+    </button>
+    <button class="tab" onclick="openAdminTab(event, 'admin-settings')">
+        <i class="fas fa-cog"></i> <span data-i18n="admin.settings">Settings</span>
+    </button>
+    <button class="tab" onclick="openAdminTab(event, 'admin-users')">
+        <i class="fas fa-users"></i> <span data-i18n="admin.users">Users</span>
+    </button>
+    <button class="tab" onclick="openAdminTab(event, 'admin-api-keys')">
+        <i class="fas fa-key"></i> <span data-i18n="admin.api_keys">API Keys</span>
+    </button>
+    <button class="tab" onclick="openAdminTab(event, 'admin-jobs')">
+        <i class="fas fa-tasks"></i> <span data-i18n="admin.all_jobs">All Jobs</span>
+    </button>
+    <a href="/" class="tab" style="margin-left: auto;">
+        <i class="fas fa-arrow-left"></i> <span>Back to App</span>
+    </a>
+</div>
+
+<!-- Dashboard Tab -->
+<div id="admin-dashboard" class="tab-content active">
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title" data-i18n="admin.stats.title">Statistics</h3>
+            <button class="button secondary sm" onclick="loadStats()">
+                <i class="fas fa-sync"></i>
+            </button>
+        </div>
+        <div id="stats-content">
+            <div class="spinner">
+                <i class="fas fa-circle-notch fa-spin"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Settings Tab -->
+<div id="admin-settings" class="tab-content">
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title" data-i18n="admin.auth_settings.title">Authentication Settings</h3>
+        </div>
+        <form id="auth-settings-form" class="settings-form">
+            <div class="form-group">
+                <label data-i18n="admin.auth_settings.enable_auth">Enable Authentication</label>
+                <input type="checkbox" id="auth_enabled" name="auth_enabled">
+            </div>
+            <div class="form-group">
+                <label for="auth_default_method" data-i18n="admin.auth_settings.default_method">Default Authentication Method</label>
+                <select id="auth_default_method" name="auth_default_method">
+                    <option value="local">Local (Email & Password)</option>
+                    <option value="http-header">HTTP Header</option>
+                    <option value="oidc">OpenID Connect</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label data-i18n="admin.auth_settings.http_header_enabled">Enable HTTP Header Authentication</label>
+                <input type="checkbox" id="auth_http_header_enabled" name="auth_http_header_enabled">
+            </div>
+            <div class="form-group">
+                <label for="auth_http_header_name" data-i18n="admin.auth_settings.http_header_name">HTTP Header Name</label>
+                <input type="text" id="auth_http_header_name" name="auth_http_header_name" placeholder="CF-Access-Authenticated-User-Email">
+            </div>
+            <div class="form-group">
+                <label data-i18n="admin.auth_settings.oidc_enabled">Enable OIDC Authentication</label>
+                <input type="checkbox" id="auth_oidc_enabled" name="auth_oidc_enabled">
+            </div>
+            <div class="form-group">
+                <label for="auth_oidc_client_id" data-i18n="admin.auth_settings.oidc_client_id">OIDC Client ID</label>
+                <input type="text" id="auth_oidc_client_id" name="auth_oidc_client_id">
+            </div>
+            <div class="form-group">
+                <label for="auth_oidc_client_secret" data-i18n="admin.auth_settings.oidc_client_secret">OIDC Client Secret</label>
+                <input type="password" id="auth_oidc_client_secret" name="auth_oidc_client_secret">
+            </div>
+            <div class="form-group">
+                <label for="auth_oidc_discovery_url" data-i18n="admin.auth_settings.oidc_discovery_url">OIDC Discovery URL</label>
+                <input type="url" id="auth_oidc_discovery_url" name="auth_oidc_discovery_url" placeholder="https://login.example.com/.well-known/openid-configuration">
+            </div>
+        </form>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title" data-i18n="admin.api_settings.title">API Settings</h3>
+        </div>
+        <form id="api-settings-form" class="settings-form">
+            <div class="form-group">
+                <label data-i18n="admin.api_settings.require_key">Require API Key for API Access</label>
+                <input type="checkbox" id="api_key_required" name="api_key_required">
+            </div>
+            <div class="form-group">
+                <label for="api_default_model" data-i18n="admin.api_settings.default_model">Default API Model</label>
+                <select id="api_default_model" name="api_default_model">
+                    <option value="tiny">tiny</option>
+                    <option value="base">base</option>
+                    <option value="small">small</option>
+                    <option value="medium">medium</option>
+                    <option value="large">large</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="max_cloud_file_mb" data-i18n="admin.api_settings.max_file_size">Max Cloud File Size (MB)</label>
+                <input type="number" id="max_cloud_file_mb" name="max_cloud_file_mb" min="1" max="100">
+            </div>
+            <div class="form-group">
+                <label for="chunk_duration_seconds" data-i18n="admin.api_settings.chunk_duration">Chunk Duration (seconds)</label>
+                <input type="number" id="chunk_duration_seconds" name="chunk_duration_seconds" min="60" max="3600">
+            </div>
+            <div class="form-group">
+                <label for="reencode_bitrate" data-i18n="admin.api_settings.reencode_bitrate">Re-encode Bitrate</label>
+                <input type="text" id="reencode_bitrate" name="reencode_bitrate" placeholder="64k">
+            </div>
+            <div class="form-group">
+                <label for="job_timeout_seconds" data-i18n="admin.api_settings.job_timeout">Job Timeout (seconds)</label>
+                <input type="number" id="job_timeout_seconds" name="job_timeout_seconds" min="60">
+            </div>
+        </form>
+    </div>
+
+    <button class="button" onclick="saveSettings()">
+        <i class="fas fa-save"></i> <span data-i18n="common.save">Save</span>
+    </button>
+</div>
+
+<!-- Users Tab -->
+<div id="admin-users" class="tab-content">
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title" data-i18n="admin.users.title">User Management</h3>
+            <div class="controls-row">
+                <button class="button secondary sm" onclick="loadUsers()">
+                    <i class="fas fa-sync"></i> <span data-i18n="common.refresh">Refresh</span>
+                </button>
+                <button class="button sm" onclick="showCreateUserModal()">
+                    <i class="fas fa-plus"></i> <span data-i18n="admin.users.create">Create User</span>
+                </button>
+            </div>
+        </div>
+        <div id="users-list" class="table-wrapper">
+            <div class="spinner">
+                <i class="fas fa-circle-notch fa-spin"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- API Keys Tab -->
+<div id="admin-api-keys" class="tab-content">
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title" data-i18n="admin.api_keys.title">API Keys</h3>
+            <div class="controls-row">
+                <button class="button secondary sm" onclick="loadApiKeys()">
+                    <i class="fas fa-sync"></i> <span data-i18n="common.refresh">Refresh</span>
+                </button>
+                <button class="button sm" onclick="showCreateApiKeyModal()">
+                    <i class="fas fa-plus"></i> <span data-i18n="admin.api_keys.create">Create API Key</span>
+                </button>
+            </div>
+        </div>
+        <div id="api-keys-list" class="table-wrapper">
+            <div class="spinner">
+                <i class="fas fa-circle-notch fa-spin"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Jobs Tab -->
+<div id="admin-jobs" class="tab-content">
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title" data-i18n="admin.jobs.title">All Jobs</h3>
+            <div class="controls-row">
+                <select id="jobs-filter" onchange="loadAllJobs()">
+                    <option value="">All</option>
+                    <option value="running">Running</option>
+                    <option value="completed">Completed</option>
+                    <option value="error">Error</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+                <button class="button secondary sm" onclick="loadAllJobs()">
+                    <i class="fas fa-sync"></i> <span data-i18n="common.refresh">Refresh</span>
+                </button>
+            </div>
+        </div>
+        <div id="all-jobs-list" class="table-wrapper">
+            <div class="spinner">
+                <i class="fas fa-circle-notch fa-spin"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Create User Modal -->
+<div id="create-user-modal" class="modal-overlay hidden">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 data-i18n="admin.users.create">Create User</h3>
+            <button class="modal-close" onclick="closeModal('create-user-modal')">&times;</button>
+        </div>
+        <form id="create-user-form">
+            <div class="form-group">
+                <label for="new-user-email" data-i18n="admin.users.email">Email</label>
+                <input type="email" id="new-user-email" required>
+            </div>
+            <div class="form-group">
+                <label for="new-user-name" data-i18n="admin.users.name">Name</label>
+                <input type="text" id="new-user-name">
+            </div>
+            <div class="form-group">
+                <label for="new-user-password" data-i18n="admin.users.password">Password</label>
+                <input type="password" id="new-user-password" required minlength="8">
+            </div>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="new-user-admin">
+                    <span data-i18n="admin.users.admin">Admin</span>
+                </label>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="button secondary" onclick="closeModal('create-user-modal')" data-i18n="common.cancel">Cancel</button>
+                <button type="submit" class="button" data-i18n="common.create">Create</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Create API Key Modal -->
+<div id="create-api-key-modal" class="modal-overlay hidden">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 data-i18n="admin.api_keys.create">Create API Key</h3>
+            <button class="modal-close" onclick="closeModal('create-api-key-modal')">&times;</button>
+        </div>
+        <form id="create-api-key-form">
+            <div class="form-group">
+                <label for="new-key-name" data-i18n="admin.api_keys.name">Name</label>
+                <input type="text" id="new-key-name" required placeholder="My API Key">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="button secondary" onclick="closeModal('create-api-key-modal')" data-i18n="common.cancel">Cancel</button>
+                <button type="submit" class="button" data-i18n="common.create">Create</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Show API Key Modal -->
+<div id="show-api-key-modal" class="modal-overlay hidden">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 data-i18n="admin.api_keys.key_created">API Key Created</h3>
+            <button class="modal-close" onclick="closeModal('show-api-key-modal')">&times;</button>
+        </div>
+        <div class="alert alert-info">
+            <i class="fas fa-exclamation-triangle"></i>
+            <span data-i18n="admin.api_keys.key_warning">Copy this key now. You won't be able to see it again!</span>
+        </div>
+        <div class="api-key-display" id="new-api-key-value"></div>
+        <div class="modal-footer">
+            <button class="button" onclick="copyApiKey()">
+                <i class="fas fa-copy"></i> <span data-i18n="common.copy">Copy</span>
+            </button>
+            <button class="button secondary" onclick="closeModal('show-api-key-modal')" data-i18n="common.close">Close</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentSettings = {};
+
+    function openAdminTab(evt, tabId) {
+        const tabContents = document.querySelectorAll('.tab-content');
+        tabContents.forEach(tc => tc.classList.remove('active'));
+
+        const tabs = document.querySelectorAll('.tab');
+        tabs.forEach(t => t.classList.remove('active'));
+
+        document.getElementById(tabId).classList.add('active');
+        if (evt && evt.currentTarget) {
+            evt.currentTarget.classList.add('active');
+        }
+
+        // Load data for the tab
+        if (tabId === 'admin-dashboard') loadStats();
+        if (tabId === 'admin-settings') loadSettings();
+        if (tabId === 'admin-users') loadUsers();
+        if (tabId === 'admin-api-keys') loadApiKeys();
+        if (tabId === 'admin-jobs') loadAllJobs();
+    }
+
+    async function loadStats() {
+        try {
+            const response = await fetch('/admin/stats');
+            const data = await response.json();
+
+            const html = `
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                    <div class="card" style="margin: 0;">
+                        <h4>${window.i18n?.t('admin.stats.total_users') || 'Total Users'}</h4>
+                        <div style="font-size: 2rem; font-weight: bold; color: var(--primary-color);">${data.users.total}</div>
+                        <div class="note">${data.users.admins} admins, ${data.users.active} active</div>
+                    </div>
+                    <div class="card" style="margin: 0;">
+                        <h4>${window.i18n?.t('admin.stats.total_jobs') || 'Total Jobs'}</h4>
+                        <div style="font-size: 2rem; font-weight: bold; color: var(--primary-color);">${data.jobs.total}</div>
+                        <div class="note">${data.jobs.completed} completed, ${data.jobs.running} running</div>
+                    </div>
+                    <div class="card" style="margin: 0;">
+                        <h4>${window.i18n?.t('admin.stats.total_api_keys') || 'API Keys'}</h4>
+                        <div style="font-size: 2rem; font-weight: bold; color: var(--primary-color);">${data.api_keys.total}</div>
+                        <div class="note">${data.api_keys.active} active</div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('stats-content').innerHTML = html;
+        } catch (e) {
+            document.getElementById('stats-content').innerHTML = '<p class="note">Failed to load statistics</p>';
+        }
+    }
+
+    async function loadSettings() {
+        try {
+            const response = await fetch('/admin/settings');
+            const settings = await response.json();
+
+            currentSettings = {};
+            settings.forEach(s => {
+                currentSettings[s.key] = s.value;
+                const el = document.getElementById(s.key);
+                if (el) {
+                    if (el.type === 'checkbox') {
+                        el.checked = s.value === true;
+                    } else {
+                        el.value = s.value;
+                    }
+                }
+            });
+        } catch (e) {
+            console.error('Failed to load settings:', e);
+        }
+    }
+
+    async function saveSettings() {
+        const settings = {};
+        const forms = ['auth-settings-form', 'api-settings-form'];
+
+        forms.forEach(formId => {
+            const form = document.getElementById(formId);
+            const inputs = form.querySelectorAll('input, select');
+            inputs.forEach(input => {
+                if (input.type === 'checkbox') {
+                    settings[input.name] = input.checked;
+                } else if (input.type === 'number') {
+                    settings[input.name] = parseInt(input.value) || 0;
+                } else {
+                    settings[input.name] = input.value;
+                }
+            });
+        });
+
+        try {
+            const response = await fetch('/admin/settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(settings)
+            });
+
+            if (response.ok) {
+                alert('Settings saved successfully');
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Failed to save settings');
+            }
+        } catch (e) {
+            alert('Failed to save settings');
+        }
+    }
+
+    async function loadUsers() {
+        try {
+            const response = await fetch('/admin/users');
+            const users = await response.json();
+
+            if (!users.length) {
+                document.getElementById('users-list').innerHTML = '<p class="note">No users yet.</p>';
+                return;
+            }
+
+            const html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Email</th>
+                            <th>Name</th>
+                            <th>Source</th>
+                            <th>Admin</th>
+                            <th>Active</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${users.map(u => `
+                            <tr>
+                                <td>${u.email}</td>
+                                <td>${u.name || '-'}</td>
+                                <td><span class="badge badge-info">${u.source}</span></td>
+                                <td>${u.is_admin ? '<span class="badge badge-success">Yes</span>' : '<span class="badge">No</span>'}</td>
+                                <td>${u.is_active ? '<span class="badge badge-success">Yes</span>' : '<span class="badge badge-danger">No</span>'}</td>
+                                <td>
+                                    <button class="button sm secondary" onclick="toggleAdmin('${u.id}')">Toggle Admin</button>
+                                    <button class="button sm danger" onclick="deleteUser('${u.id}')">Delete</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            document.getElementById('users-list').innerHTML = html;
+        } catch (e) {
+            document.getElementById('users-list').innerHTML = '<p class="note">Failed to load users</p>';
+        }
+    }
+
+    async function loadApiKeys() {
+        try {
+            const response = await fetch('/admin/api-keys');
+            const keys = await response.json();
+
+            if (!keys.length) {
+                document.getElementById('api-keys-list').innerHTML = '<p class="note">No API keys created yet.</p>';
+                return;
+            }
+
+            const html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Key</th>
+                            <th>Status</th>
+                            <th>Usage</th>
+                            <th>Last Used</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${keys.map(k => `
+                            <tr>
+                                <td>${k.name}</td>
+                                <td><code>${k.key_prefix}...</code></td>
+                                <td>${k.is_enabled ? '<span class="badge badge-success">Enabled</span>' : '<span class="badge badge-danger">Disabled</span>'}</td>
+                                <td>${k.usage_count}</td>
+                                <td>${k.last_used_at ? formatDate(k.last_used_at) : 'Never'}</td>
+                                <td>
+                                    <button class="button sm secondary" onclick="toggleApiKey('${k.id}', ${!k.is_enabled})">${k.is_enabled ? 'Disable' : 'Enable'}</button>
+                                    <button class="button sm danger" onclick="deleteApiKey('${k.id}')">Delete</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            document.getElementById('api-keys-list').innerHTML = html;
+        } catch (e) {
+            document.getElementById('api-keys-list').innerHTML = '<p class="note">Failed to load API keys</p>';
+        }
+    }
+
+    async function loadAllJobs() {
+        const filter = document.getElementById('jobs-filter').value;
+        const url = filter ? `/admin/jobs?status=${filter}` : '/admin/jobs';
+
+        try {
+            const response = await fetch(url);
+            const jobs = await response.json();
+
+            if (!jobs.length) {
+                document.getElementById('all-jobs-list').innerHTML = '<p class="note">No jobs found.</p>';
+                return;
+            }
+
+            const html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>User</th>
+                            <th>Status</th>
+                            <th>Method</th>
+                            <th>Started</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${jobs.map(j => `
+                            <tr>
+                                <td><code>${j.id.substring(0, 8)}...</code></td>
+                                <td>${j.user_email}</td>
+                                <td><span class="status-${j.status}">${j.status}</span></td>
+                                <td>${j.method} / ${j.model || '-'}</td>
+                                <td>${j.started_at ? formatDate(j.started_at) : '-'}</td>
+                                <td>
+                                    ${j.status === 'running' ? `<button class="button sm secondary" onclick="cancelJob('${j.id}')">Cancel</button>` : ''}
+                                    <button class="button sm danger" onclick="deleteJob('${j.id}')">Delete</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            document.getElementById('all-jobs-list').innerHTML = html;
+        } catch (e) {
+            document.getElementById('all-jobs-list').innerHTML = '<p class="note">Failed to load jobs</p>';
+        }
+    }
+
+    function showCreateUserModal() {
+        document.getElementById('create-user-modal').classList.remove('hidden');
+    }
+
+    function showCreateApiKeyModal() {
+        document.getElementById('create-api-key-modal').classList.remove('hidden');
+    }
+
+    function closeModal(id) {
+        document.getElementById(id).classList.add('hidden');
+    }
+
+    document.getElementById('create-user-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = document.getElementById('new-user-email').value;
+        const name = document.getElementById('new-user-name').value;
+        const password = document.getElementById('new-user-password').value;
+        const isAdmin = document.getElementById('new-user-admin').checked;
+
+        try {
+            const response = await fetch('/admin/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, name, password, is_admin: isAdmin })
+            });
+
+            if (response.ok) {
+                closeModal('create-user-modal');
+                loadUsers();
+                e.target.reset();
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Failed to create user');
+            }
+        } catch (e) {
+            alert('Failed to create user');
+        }
+    });
+
+    document.getElementById('create-api-key-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('new-key-name').value;
+
+        try {
+            const response = await fetch('/admin/api-keys', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                closeModal('create-api-key-modal');
+                document.getElementById('new-api-key-value').textContent = data.key;
+                document.getElementById('show-api-key-modal').classList.remove('hidden');
+                loadApiKeys();
+                e.target.reset();
+            } else {
+                alert(data.error || 'Failed to create API key');
+            }
+        } catch (e) {
+            alert('Failed to create API key');
+        }
+    });
+
+    function copyApiKey() {
+        const key = document.getElementById('new-api-key-value').textContent;
+        navigator.clipboard.writeText(key).then(() => {
+            alert('Copied to clipboard!');
+        });
+    }
+
+    async function toggleAdmin(userId) {
+        try {
+            const response = await fetch(`/admin/users/${userId}/promote`, { method: 'POST' });
+            if (response.ok) {
+                loadUsers();
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Failed to toggle admin');
+            }
+        } catch (e) {
+            alert('Failed to toggle admin');
+        }
+    }
+
+    async function deleteUser(userId) {
+        if (!confirm('Delete this user?')) return;
+        try {
+            const response = await fetch(`/admin/users/${userId}`, { method: 'DELETE' });
+            if (response.ok) {
+                loadUsers();
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Failed to delete user');
+            }
+        } catch (e) {
+            alert('Failed to delete user');
+        }
+    }
+
+    async function toggleApiKey(keyId, enable) {
+        try {
+            const response = await fetch(`/admin/api-keys/${keyId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ is_enabled: enable })
+            });
+            if (response.ok) {
+                loadApiKeys();
+            }
+        } catch (e) {
+            alert('Failed to update API key');
+        }
+    }
+
+    async function deleteApiKey(keyId) {
+        if (!confirm('Delete this API key?')) return;
+        try {
+            const response = await fetch(`/admin/api-keys/${keyId}`, { method: 'DELETE' });
+            if (response.ok) {
+                loadApiKeys();
+            }
+        } catch (e) {
+            alert('Failed to delete API key');
+        }
+    }
+
+    async function cancelJob(jobId) {
+        try {
+            const response = await fetch(`/admin/jobs/${jobId}/cancel`, { method: 'POST' });
+            if (response.ok) {
+                loadAllJobs();
+            }
+        } catch (e) {
+            alert('Failed to cancel job');
+        }
+    }
+
+    async function deleteJob(jobId) {
+        if (!confirm('Delete this job?')) return;
+        try {
+            const response = await fetch(`/admin/jobs/${jobId}`, { method: 'DELETE' });
+            if (response.ok) {
+                loadAllJobs();
+            }
+        } catch (e) {
+            alert('Failed to delete job');
+        }
+    }
+
+    // Load initial data
+    document.addEventListener('DOMContentLoaded', () => {
+        loadStats();
+    });
+</script>
+{% endblock %}

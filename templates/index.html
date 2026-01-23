@@ -1,862 +1,625 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Whisper Transcription</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        :root {
-            --primary-color: #4a6ee0;
-            --primary-light: #e9effd;
-            --secondary-color: #6c757d;
-            --success-color: #28a745;
-            --info-color: #17a2b8;
-            --light-gray: #f8f9fa;
-            --dark-gray: #343a40;
-            --border-radius: 8px;
-            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            --transition: all 0.3s ease;
-        }
-        
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background-color: #f5f7fa;
-            padding: 20px;
-        }
-        
-        .container {
-            max-width: 1000px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        
-        header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        
-        h1 {
-            color: var(--primary-color);
-            font-size: 2.5rem;
-            margin-bottom: 10px;
-        }
-        
-        h2 {
-            color: var(--secondary-color);
-            font-size: 1.5rem;
-            margin: 25px 0 15px 0;
-        }
-        
-        .card {
-            background-color: white;
-            border-radius: var(--border-radius);
-            box-shadow: var(--box-shadow);
-            padding: 25px;
-            margin-bottom: 25px;
-            transition: var(--transition);
-        }
-        
-        .card:hover {
-            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
-        }
-        
-        .tabs {
-            display: flex;
-            margin-bottom: 20px;
-            border-bottom: 1px solid #dee2e6;
-        }
-        
-        .tab {
-            padding: 12px 20px;
-            cursor: pointer;
-            border: none;
-            background: none;
-            font-size: 1rem;
-            font-weight: 500;
-            color: var(--secondary-color);
-            transition: var(--transition);
-        }
-        
-        .tab.active {
-            color: var(--primary-color);
-            border-bottom: 3px solid var(--primary-color);
-        }
-        
-        .tab:hover:not(.active) {
-            color: var(--primary-color);
-            background-color: var(--primary-light);
-        }
-        
-        .tab-content {
-            display: none;
-        }
-        
-        .tab-content.active {
-            display: block;
-        }
-        
-        .form-group {
-            margin-bottom: 20px;
-        }
-        
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 500;
-        }
-        
-        select, input[type="file"] {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ced4da;
-            border-radius: var(--border-radius);
-            font-size: 1rem;
-            transition: var(--transition);
-        }
-        
-        select:focus, input:focus {
-            outline: none;
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 0.2rem rgba(74, 110, 224, 0.25);
-        }
-        
-        .button {
-            display: inline-block;
-            font-weight: 500;
-            color: white;
-            background-color: var(--primary-color);
-            border: none;
-            padding: 12px 20px;
-            font-size: 1rem;
-            border-radius: var(--border-radius);
-            cursor: pointer;
-            transition: var(--transition);
-        }
-        
-        .button:hover {
-            background-color: #3a5abb;
-            transform: translateY(-2px);
-        }
-        
-        .button.secondary {
-            background-color: var(--secondary-color);
-        }
-        
-        .button.secondary:hover {
-            background-color: #5a6268;
-        }
-        
-        .transcription-box {
-            background-color: var(--light-gray);
-            border-radius: var(--border-radius);
-            padding: 20px;
-            min-height: 150px;
-            position: relative;
-            border: 1px solid #dee2e6;
-        }
-    .transcription-header { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
-    .controls-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-    .search-input { padding:10px; border:1px solid #ced4da; border-radius: var(--border-radius); }
-    .timestamp { color:#6c757d; font-family: monospace; margin-right:8px; white-space:nowrap; }
-    .segment-line { margin: 4px 0; }
-        
-        .copy-button {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background-color: white;
-            border: 1px solid #dee2e6;
-            border-radius: 4px;
-            width: 40px;
-            height: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: var(--transition);
-        }
-        
-        .copy-button:hover {
-            background-color: var(--primary-light);
-            color: var(--primary-color);
-        }
-        
-        .alert {
-            padding: 15px;
-            border-radius: var(--border-radius);
-            margin-bottom: 20px;
-            color: white;
-        }
-        
-        .alert-success {
-            background-color: var(--success-color);
-        }
-        
-        .spinner {
-            display: none;
-            text-align: center;
-            padding: 20px;
-        }
-        
-        @media (max-width: 768px) {
-            .container {
-                padding: 10px;
-            }
-            
-            h1 {
-                font-size: 2rem;
-            }
-            
-            .card {
-                padding: 15px;
-            }
-            
-            .tab {
-                padding: 10px 15px;
-                font-size: 0.9rem;
-            }
-        }
+{% extends "base.html" %}
 
-        /* Progress UI */
-        .progress-card {
-            margin-top: 15px;
-        }
-        .progress-wrapper {
-            background: #eee;
-            border-radius: var(--border-radius);
-            overflow: hidden;
-            height: 14px;
-            margin-top: 10px;
-        }
-        .progress-bar {
-            width: 0%;
-            height: 100%;
-            background: var(--primary-color);
-            transition: width 0.3s ease;
-        }
-        .progress-status {
-            margin-top: 8px;
-            color: var(--secondary-color);
-        }
-    .hidden { display: none; }
-    .note { font-size: 0.9rem; color: var(--secondary-color); margin-top: 6px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <header>
-            <h1>Whisper Transcription</h1>
-            <p>Transcribe audio files using OpenAI's Whisper or local models</p>
-        </header>
-        
-        <div class="tabs">
-            <button class="tab active" onclick="openTab(event, 'transcribe-tab')">Transcribe</button>
-            <button class="tab" onclick="openTab(event, 'jobs-tab')">Jobs</button>
-            <button class="tab" onclick="openTab(event, 'history-tab')">History</button>
-            {% if cf_enforced %}
-            <button class="tab" onclick="openTab(event, 'users-tab')">Users</button>
-            {% endif %}
-            <button class="tab" onclick="openTab(event, 'settings-tab')">API Settings</button>
-        </div>
-        
-        <!-- Transcribe Tab -->
-        <div id="transcribe-tab" class="tab-content active">
-            <div class="card">
-                <form id="transcription-form" method="POST" enctype="multipart/form-data">
-                    <div class="form-group">
-                        <label>Input Source:</label>
-                        <div class="controls-row">
-                            <label><input type="radio" name="input_source" value="file" id="source-file" checked> File upload</label>
-                            <label><input type="radio" name="input_source" value="url" id="source-url"> YouTube/Twitch URL</label>
-                        </div>
-                        <div class="note">Provide either an audio file or a media URL. URLs from YouTube and Twitch are supported.</div>
-                    </div>
-                    <div class="form-group">
-                        <label for="transcription-method">Transcription Method:</label>
-                        <select name="transcription_method" id="transcription-method" onchange="updateModelOptions()">
-                            <option value="local" {% if selected_method == 'local' %}selected{% endif %}>Local Whisper Model</option>
-                            {% if cloud_available %}
-                            <option value="cloud" {% if selected_method == 'cloud' %}selected{% endif %}>OpenAI Cloud API</option>
-                            {% endif %}
-                        </select>
-                    </div>
-                    
-                    <div class="form-group" id="local-model-group" {% if selected_method == 'cloud' %}style="display:none"{% endif %}>
-                        <label for="local-model-size">Local Model Size:</label>
-                        <select name="local_model_size" id="local-model-size">
-                            <option value="tiny" {% if local_model_size == 'tiny' %}selected{% endif %}>tiny</option>
-                            <option value="base" {% if local_model_size == 'base' or not local_model_size %}selected{% endif %}>base</option>
-                            <option value="small" {% if local_model_size == 'small' %}selected{% endif %}>small</option>
-                            <option value="medium" {% if local_model_size == 'medium' %}selected{% endif %}>medium</option>
-                            <option value="large" {% if local_model_size == 'large' %}selected{% endif %}>large</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group" id="cloud-model-group" {% if selected_method != 'cloud' %}style="display:none"{% endif %}>
-                        <label for="cloud-model">Cloud Model:</label>
-                        <select name="cloud_model" id="cloud-model">
-                            <option value="whisper-1" {% if cloud_model == 'whisper-1' or not cloud_model %}selected{% endif %}>whisper-1</option>
-                            <option value="gpt-4o-transcribe" {% if cloud_model == 'gpt-4o-transcribe' %}selected{% endif %}>gpt-4o-transcribe</option>
-                            <option value="gpt-4o-mini-transcribe" {% if cloud_model == 'gpt-4o-mini-transcribe' %}selected{% endif %}>gpt-4o-mini-transcribe</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group" id="file-group">
-                        <label for="audio-file">Upload Audio File:</label>
-                        <input type="file" name="audio_file" id="audio-file" accept="audio/*">
-                    </div>
-                    <div class="form-group hidden" id="url-group">
-                        <label for="media-url">Media URL (YouTube or Twitch):</label>
-                        <input type="url" name="media_url" id="media-url" placeholder="https://www.youtube.com/watch?v=...">
-                    </div>
-                    <div class="form-group">
-                        <label><input type="checkbox" id="with-timestamps" name="with_timestamps"> Show timestamps</label>
-                        <div id="timestamps-note" class="note hidden">Timestamps are not supported by gpt-4o-transcribe or gpt-4o-mini-transcribe. Please use whisper-1 or a local model if you need timestamps.</div>
-                    </div>
-                    
-                    <button type="submit" class="button">
-                        <i class="fas fa-play"></i> Transcribe
-                    </button>
-                </form>
+{% block title %}Whisper Transcription{% endblock %}
 
-                <div id="spinner" class="spinner">
-                    <i class="fas fa-circle-notch fa-spin fa-3x"></i>
-                    <p>Transcribing... This may take a while depending on the file size and model.</p>
+{% block content %}
+<div class="tabs">
+    <button class="tab active" onclick="openTab(event, 'transcribe-tab')" data-i18n="nav.transcribe">Transcribe</button>
+    <button class="tab" onclick="openTab(event, 'jobs-tab')" data-i18n="nav.jobs">Jobs</button>
+    <button class="tab" onclick="openTab(event, 'history-tab')" data-i18n="nav.history">History</button>
+    {% if user and user.is_admin %}
+    <a href="/admin" class="tab" data-i18n="nav.admin">Admin</a>
+    {% endif %}
+    <button class="tab" onclick="openTab(event, 'settings-tab')" data-i18n="nav.settings">Settings</button>
+</div>
+
+<!-- Transcribe Tab -->
+<div id="transcribe-tab" class="tab-content active">
+    <div class="card">
+        <form id="transcription-form" method="POST" enctype="multipart/form-data">
+            <div class="form-group">
+                <label data-i18n="transcribe.input_source">Input Source:</label>
+                <div class="radio-group">
+                    <label class="radio-label">
+                        <input type="radio" name="input_source" value="file" id="source-file" checked>
+                        <span data-i18n="transcribe.file_upload">File upload</span>
+                    </label>
+                    <label class="radio-label">
+                        <input type="radio" name="input_source" value="url" id="source-url">
+                        <span data-i18n="transcribe.url_input">YouTube/Twitch URL</span>
+                    </label>
                 </div>
-
-                <div id="progress-container" class="card progress-card hidden">
-                    <h2>Progress</h2>
-                    <div class="progress-wrapper">
-                        <div id="progress-bar" class="progress-bar"></div>
-                    </div>
-                    <p id="progress-status" class="progress-status">Starting…</p>
-                </div>
+                <div class="note" data-i18n="transcribe.source_note">Provide either an audio file or a media URL. URLs from YouTube and Twitch are supported.</div>
             </div>
 
-            <noscript>
-            {% if transcription %}
-            <div class="card">
-                <h2>Transcription Result</h2>
-                <div class="transcription-box">
-                    <button class="copy-button" onclick="copyTranscription()" title="Copy to clipboard">
-                        <i class="fas fa-copy"></i>
-                    </button>
-                    <p id="transcription-text">{{ transcription }}</p>
-                </div>
+            <div class="form-group">
+                <label for="transcription-method" data-i18n="transcribe.method">Transcription Method:</label>
+                <select name="transcription_method" id="transcription-method" onchange="updateModelOptions()">
+                    <option value="local" {% if selected_method == 'local' %}selected{% endif %} data-i18n="transcribe.local_model">Local Whisper Model</option>
+                    {% if cloud_available %}
+                    <option value="cloud" {% if selected_method == 'cloud' %}selected{% endif %} data-i18n="transcribe.cloud_api">OpenAI Cloud API</option>
+                    {% endif %}
+                </select>
             </div>
-            {% endif %}
-            </noscript>
-            <div id="result-container"></div>
-        </div>
-        
-        <!-- Jobs Tab -->
-        <div id="jobs-tab" class="tab-content">
-            <div class="card">
-                <h2>Active Jobs</h2>
-                <div class="note">Transcriptions continue on the server even if this page is closed. You can cancel running jobs here.</div>
-                <div class="controls-row" style="margin: 10px 0;">
-                    <button class="button secondary" id="jobs-refresh"><i class="fas fa-sync"></i> Refresh</button>
-                    <label><input type="checkbox" id="jobs-autorefresh" checked> Auto-refresh</label>
-                </div>
-                <div id="jobs-list"></div>
+
+            <div class="form-group" id="local-model-group" {% if selected_method == 'cloud' %}style="display:none"{% endif %}>
+                <label for="local-model-size" data-i18n="transcribe.model_size">Local Model Size:</label>
+                <select name="local_model_size" id="local-model-size">
+                    <option value="tiny" {% if local_model_size == 'tiny' %}selected{% endif %}>tiny</option>
+                    <option value="base" {% if local_model_size == 'base' or not local_model_size %}selected{% endif %}>base</option>
+                    <option value="small" {% if local_model_size == 'small' %}selected{% endif %}>small</option>
+                    <option value="medium" {% if local_model_size == 'medium' %}selected{% endif %}>medium</option>
+                    <option value="large" {% if local_model_size == 'large' %}selected{% endif %}>large</option>
+                </select>
             </div>
+
+            <div class="form-group" id="cloud-model-group" {% if selected_method != 'cloud' %}style="display:none"{% endif %}>
+                <label for="cloud-model" data-i18n="transcribe.cloud_model">Cloud Model:</label>
+                <select name="cloud_model" id="cloud-model">
+                    <option value="whisper-1" {% if cloud_model == 'whisper-1' or not cloud_model %}selected{% endif %}>whisper-1</option>
+                    <option value="gpt-4o-transcribe" {% if cloud_model == 'gpt-4o-transcribe' %}selected{% endif %}>gpt-4o-transcribe</option>
+                    <option value="gpt-4o-mini-transcribe" {% if cloud_model == 'gpt-4o-mini-transcribe' %}selected{% endif %}>gpt-4o-mini-transcribe</option>
+                </select>
+            </div>
+
+            <div class="form-group" id="file-group">
+                <label for="audio-file" data-i18n="transcribe.upload_file">Upload Audio File:</label>
+                <input type="file" name="audio_file" id="audio-file" accept="audio/*">
+            </div>
+
+            <div class="form-group hidden" id="url-group">
+                <label for="media-url" data-i18n="transcribe.media_url">Media URL (YouTube or Twitch):</label>
+                <input type="url" name="media_url" id="media-url" placeholder="https://www.youtube.com/watch?v=...">
+            </div>
+
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="with-timestamps" name="with_timestamps">
+                    <span data-i18n="transcribe.timestamps">Show timestamps</span>
+                </label>
+                <div id="timestamps-note" class="note hidden" data-i18n="transcribe.timestamps_note">Timestamps are not supported by gpt-4o-transcribe or gpt-4o-mini-transcribe. Please use whisper-1 or a local model if you need timestamps.</div>
+            </div>
+
+            <button type="submit" class="button">
+                <i class="fas fa-play"></i>
+                <span data-i18n="transcribe.button">Transcribe</span>
+            </button>
+        </form>
+
+        <div id="spinner" class="spinner">
+            <i class="fas fa-circle-notch fa-spin fa-3x"></i>
+            <p data-i18n="transcribe.processing">Transcribing... This may take a while depending on the file size and model.</p>
         </div>
 
-        <!-- History Tab -->
-        <div id="history-tab" class="tab-content">
-            <div class="card">
-                <h2>History</h2>
-                <div class="controls-row" style="margin: 10px 0;">
-                    <button class="button secondary" id="history-refresh"><i class="fas fa-sync"></i> Refresh</button>
-                </div>
-                <div id="history-list"></div>
-                <div id="history-detail"></div>
+        <div id="progress-container" class="card progress-card hidden">
+            <h3 data-i18n="transcribe.progress">Progress</h3>
+            <div class="progress-wrapper">
+                <div id="progress-bar" class="progress-bar"></div>
             </div>
+            <p id="progress-status" class="progress-status" data-i18n="common.loading">Starting…</p>
         </div>
+    </div>
 
-        {% if cf_enforced %}
-        <!-- Users Tab -->
-        <div id="users-tab" class="tab-content">
-            <div class="card">
-                <h2>Users</h2>
-                <div class="controls-row" style="margin: 10px 0;">
-                    <button class="button secondary" id="users-refresh"><i class="fas fa-sync"></i> Refresh</button>
-                </div>
-                <div id="users-list"></div>
-            </div>
+    <div id="result-container"></div>
+</div>
+
+<!-- Jobs Tab -->
+<div id="jobs-tab" class="tab-content">
+    <div class="card">
+        <h2 data-i18n="jobs.active_jobs">Active Jobs</h2>
+        <div class="note" data-i18n="jobs.note">Transcriptions continue on the server even if this page is closed. You can cancel running jobs here.</div>
+        <div class="controls-row" style="margin: 15px 0;">
+            <button class="button secondary" id="jobs-refresh">
+                <i class="fas fa-sync"></i>
+                <span data-i18n="common.refresh">Refresh</span>
+            </button>
+            <label class="checkbox-label">
+                <input type="checkbox" id="jobs-autorefresh" checked>
+                <span data-i18n="jobs.auto_refresh">Auto-refresh</span>
+            </label>
+        </div>
+        <div id="jobs-list"></div>
+    </div>
+</div>
+
+<!-- History Tab -->
+<div id="history-tab" class="tab-content">
+    <div class="card">
+        <h2 data-i18n="history.title">History</h2>
+        <div class="controls-row" style="margin: 15px 0;">
+            <button class="button secondary" id="history-refresh">
+                <i class="fas fa-sync"></i>
+                <span data-i18n="common.refresh">Refresh</span>
+            </button>
+        </div>
+        <div id="history-list"></div>
+        <div id="history-detail"></div>
+    </div>
+</div>
+
+<!-- Settings Tab -->
+<div id="settings-tab" class="tab-content">
+    <div class="card">
+        <h2 data-i18n="settings.api_settings">API Settings</h2>
+        <p data-i18n="settings.api_description">Configure which local model to use when receiving API requests with the model="whisper-1" parameter.</p>
+
+        {% if settings_saved %}
+        <div class="alert alert-success">
+            <i class="fas fa-check-circle"></i>
+            <span data-i18n="common.success">Settings saved successfully!</span>
         </div>
         {% endif %}
 
-        <!-- Settings Tab -->
-        <div id="settings-tab" class="tab-content">
-            <div class="card">
-                <h2>API Settings</h2>
-                <p>Configure which local model to use when receiving API requests with the model="whisper-1" parameter.</p>
-                
-                {% if settings_saved %}
-                <div class="alert alert-success">
-                    <i class="fas fa-check-circle"></i> Settings saved successfully!
-                </div>
-                {% endif %}
-                
-                <form method="POST">
-                    <input type="hidden" name="action" value="save_settings">
-                    <input type="hidden" name="transcription_method" value="{{ selected_method }}">
-                    <input type="hidden" name="local_model_size" value="{{ local_model_size }}">
-                    <input type="hidden" name="cloud_model" value="{{ cloud_model }}">
-                    
-                    <div class="form-group">
-                        <label for="api-model">Default API Model:</label>
-                        <select name="api_model" id="api-model">
-                            <option value="tiny" {% if api_model == 'tiny' %}selected{% endif %}>tiny</option>
-                            <option value="base" {% if api_model == 'base' or not api_model %}selected{% endif %}>base</option>
-                            <option value="small" {% if api_model == 'small' %}selected{% endif %}>small</option>
-                            <option value="medium" {% if api_model == 'medium' %}selected{% endif %}>medium</option>
-                            <option value="large" {% if api_model == 'large' %}selected{% endif %}>large</option>
-                        </select>
-                    </div>
-                    
-                    <button type="submit" class="button">
-                        <i class="fas fa-save"></i> Save Settings
-                    </button>
-                </form>
+        <form method="POST" id="settings-form">
+            <input type="hidden" name="action" value="save_settings">
+            <input type="hidden" name="transcription_method" value="{{ selected_method }}">
+            <input type="hidden" name="local_model_size" value="{{ local_model_size }}">
+            <input type="hidden" name="cloud_model" value="{{ cloud_model }}">
+
+            <div class="form-group">
+                <label for="api-model" data-i18n="settings.default_api_model">Default API Model:</label>
+                <select name="api_model" id="api-model">
+                    <option value="tiny" {% if api_model == 'tiny' %}selected{% endif %}>tiny</option>
+                    <option value="base" {% if api_model == 'base' or not api_model %}selected{% endif %}>base</option>
+                    <option value="small" {% if api_model == 'small' %}selected{% endif %}>small</option>
+                    <option value="medium" {% if api_model == 'medium' %}selected{% endif %}>medium</option>
+                    <option value="large" {% if api_model == 'large' %}selected{% endif %}>large</option>
+                </select>
             </div>
-        </div>
+
+            <button type="submit" class="button">
+                <i class="fas fa-save"></i>
+                <span data-i18n="common.save">Save Settings</span>
+            </button>
+        </form>
     </div>
-    
-    <script>
-        function updateModelOptions() {
-            const method = document.getElementById('transcription-method').value;
-            const localGroup = document.getElementById('local-model-group');
-            const cloudGroup = document.getElementById('cloud-model-group');
-            
-            if (method === 'local') {
-                localGroup.style.display = 'block';
-                cloudGroup.style.display = 'none';
-            } else {
-                localGroup.style.display = 'none';
-                cloudGroup.style.display = 'block';
-            }
-            // Also refresh timestamp availability based on current selection
-            updateTimestampAvailability();
-        }
+</div>
+{% endblock %}
 
-        function updateTimestampAvailability() {
-            const method = document.getElementById('transcription-method').value;
-            const tsCheckbox = document.getElementById('with-timestamps');
-            const note = document.getElementById('timestamps-note');
-            let disable = false;
-            if (method === 'cloud') {
-                const cloudModelSel = document.getElementById('cloud-model');
-                const val = cloudModelSel ? cloudModelSel.value : '';
-                if (val && val.startsWith('gpt-4o')) {
-                    disable = true;
-                }
-            }
-            tsCheckbox.disabled = disable;
-            if (disable) {
-                tsCheckbox.checked = false;
-                note.classList.remove('hidden');
-            } else {
-                note.classList.add('hidden');
-            }
-        }
-        
-        function openTab(evt, tabId) {
-            const tabContents = document.getElementsByClassName('tab-content');
-            for (let i = 0; i < tabContents.length; i++) {
-                tabContents[i].classList.remove('active');
-            }
-            
-            const tabs = document.getElementsByClassName('tab');
-            for (let i = 0; i < tabs.length; i++) {
-                tabs[i].classList.remove('active');
-            }
-            
-            document.getElementById(tabId).classList.add('active');
-            evt.currentTarget.classList.add('active');
-            if (tabId === 'jobs-tab') {
-                loadJobs();
-            }
-            if (tabId === 'history-tab') {
-                loadHistory();
-            }
-            if (tabId === 'users-tab') {
-                loadUsers();
-            }
-        }
-        
-        function copyTranscription() {
-            const text = document.getElementById('transcription-text').innerText;
-            navigator.clipboard.writeText(text).then(function() {
-                const copyButton = document.querySelector('.copy-button');
-                const originalIcon = copyButton.innerHTML;
-                copyButton.innerHTML = '<i class="fas fa-check"></i>';
-                setTimeout(function() {
-                    copyButton.innerHTML = originalIcon;
-                }, 1500);
-            });
-        }
-        
-        function updateSourceUI() {
-            const sourceFile = document.getElementById('source-file').checked;
-            const fileGroup = document.getElementById('file-group');
-            const urlGroup = document.getElementById('url-group');
-            const fileInput = document.getElementById('audio-file');
-            const urlInput = document.getElementById('media-url');
-            if (sourceFile) {
-                fileGroup.style.display = 'block';
-                urlGroup.style.display = 'none';
-                fileInput.required = false; // we'll validate manually
-                urlInput.required = false;
-                urlInput.value = '';
-            } else {
-                fileGroup.style.display = 'none';
-                urlGroup.style.display = 'block';
-                fileInput.required = false;
-            }
-        }
-        // AJAX form submission to prevent full page reload
-        document.addEventListener('DOMContentLoaded', function() {
-            const form = document.getElementById('transcription-form');
-            const progressContainer = document.getElementById('progress-container');
-            const progressBar = document.getElementById('progress-bar');
-            const progressStatus = document.getElementById('progress-status');
-            let pollTimer = null;
-            let jobsTimer = null;
+{% block scripts %}
+<script>
+    function updateModelOptions() {
+        const method = document.getElementById('transcription-method').value;
+        const localGroup = document.getElementById('local-model-group');
+        const cloudGroup = document.getElementById('cloud-model-group');
 
-            // Initialize timestamp availability and react to model changes
-            updateTimestampAvailability();
+        if (method === 'local') {
+            localGroup.style.display = 'block';
+            cloudGroup.style.display = 'none';
+        } else {
+            localGroup.style.display = 'none';
+            cloudGroup.style.display = 'block';
+        }
+        updateTimestampAvailability();
+    }
+
+    function updateTimestampAvailability() {
+        const method = document.getElementById('transcription-method').value;
+        const tsCheckbox = document.getElementById('with-timestamps');
+        const note = document.getElementById('timestamps-note');
+        let disable = false;
+        if (method === 'cloud') {
             const cloudModelSel = document.getElementById('cloud-model');
-            if (cloudModelSel) {
-                cloudModelSel.addEventListener('change', updateTimestampAvailability);
+            const val = cloudModelSel ? cloudModelSel.value : '';
+            if (val && val.startsWith('gpt-4o')) {
+                disable = true;
             }
+        }
+        tsCheckbox.disabled = disable;
+        if (disable) {
+            tsCheckbox.checked = false;
+            note.classList.remove('hidden');
+        } else {
+            note.classList.add('hidden');
+        }
+    }
 
-            // Source toggle
-            document.getElementById('source-file').addEventListener('change', updateSourceUI);
-            document.getElementById('source-url').addEventListener('change', updateSourceUI);
-            updateSourceUI();
+    function updateSourceUI() {
+        const sourceFile = document.getElementById('source-file').checked;
+        const fileGroup = document.getElementById('file-group');
+        const urlGroup = document.getElementById('url-group');
+        const fileInput = document.getElementById('audio-file');
+        const urlInput = document.getElementById('media-url');
+        if (sourceFile) {
+            fileGroup.classList.remove('hidden');
+            urlGroup.classList.add('hidden');
+            fileInput.required = false;
+            urlInput.required = false;
+            urlInput.value = '';
+        } else {
+            fileGroup.classList.add('hidden');
+            urlGroup.classList.remove('hidden');
+            fileInput.required = false;
+        }
+    }
 
-            function resetProgress() {
-                progressBar.style.width = '0%';
-                progressStatus.textContent = 'Starting…';
-            }
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.getElementById('transcription-form');
+        const progressContainer = document.getElementById('progress-container');
+        const progressBar = document.getElementById('progress-bar');
+        const progressStatus = document.getElementById('progress-status');
+        let pollTimer = null;
+        let jobsTimer = null;
 
-            function pollStatus(jobId) {
-                pollTimer = setInterval(() => {
-                    fetch(`/transcribe_status/${jobId}`)
-                        .then(r => r.json())
-                        .then(job => {
-                            if (job.error && !job.status) {
-                                throw new Error(job.error);
-                            }
-                            const pct = typeof job.percent === 'number' ? job.percent : 0;
-                            progressBar.style.width = `${pct}%`;
-                            progressStatus.textContent = job.status || 'Working…';
+        // Initialize timestamp availability and react to model changes
+        updateTimestampAvailability();
+        const cloudModelSel = document.getElementById('cloud-model');
+        if (cloudModelSel) {
+            cloudModelSel.addEventListener('change', updateTimestampAvailability);
+        }
 
-                            if (job.result || job.error) {
-                                clearInterval(pollTimer);
-                                document.getElementById('spinner').style.display = 'none';
-                                if (job.error) {
-                                    alert(job.error);
-                                    progressContainer.style.display = 'none';
-                                    return;
-                                }
-                                                                const resultContainer = document.getElementById('result-container');
-                                                                const res = job.result;
-                                                                let transcription = '';
-                                                                let segments = null;
-                                                                if (res && typeof res === 'object' && 'text' in res) {
-                                                                        transcription = res.text || '';
-                                                                        segments = res.segments || null;
-                                                                } else {
-                                                                        transcription = (res ?? '').toString();
-                                                                }
-                                                                const resultHTML = `
-                        <div class="card">
-                            <h2>Transcription Result</h2>
-                            <div class="transcription-header">
-                                <div class="controls-row">
-                                    <button class="button secondary" id="toggle-timestamps"><i class="fas fa-clock"></i> Toggle timestamps</button>
-                                    <input class="search-input" id="search-input" type="text" placeholder="Search transcript…" />
-                                    <button class="button secondary" id="download-plain"><i class="fas fa-download"></i> Download (plain)</button>
-                                    <button class="button secondary" id="download-ts"><i class="fas fa-file-download"></i> Download (timestamps)</button>
-                                </div>
-                                <button class="copy-button" title="Copy to clipboard"><i class="fas fa-copy"></i></button>
-                            </div>
-                            <div class="transcription-box">
-                                <div id="transcription-render"></div>
-                            </div>
-                        </div>`;
-                                                                resultContainer.innerHTML = resultHTML;
-                                                                const state = { showTimestamps: !!segments, transcription, segments };
-                                                                function secondsToHHMMSS(s){ s = Math.max(0, Math.floor(s||0)); const h=String(Math.floor(s/3600)).padStart(2,'0'); const m=String(Math.floor((s%3600)/60)).padStart(2,'0'); const ss=String(s%60).padStart(2,'0'); return `${h}:${m}:${ss}`; }
-                                                                function renderTranscript(filter=""){
-                                                                    const container = document.getElementById('transcription-render');
-                                                                    container.innerHTML = '';
-                                                                    const term=(filter||"").toLowerCase().trim();
-                                                                    if(!state.segments || !state.showTimestamps){
-                                                                        let text = state.transcription || '';
-                                                                        if(term){ const re = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'); text = text.replace(re, m=>`<mark>${m}</mark>`);} 
-                                                                        container.innerHTML = `<p>${text}</p>`; return; }
-                                                                    const frag = document.createDocumentFragment();
-                                                                    (state.segments||[]).forEach(seg=>{
-                                                                        let line = seg.text || '';
-                                                                        let show = true;
-                                                                        if(term){ show = line.toLowerCase().includes(term); const re=new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'); line = line.replace(re, m=>`<mark>${m}</mark>`);} 
-                                                                        if(!show) return;
-                                                                        const div=document.createElement('div'); div.className='segment-line';
-                                                                        const ts = `${secondsToHHMMSS(seg.start)} → ${secondsToHHMMSS(seg.end)}`;
-                                                                        div.innerHTML = `<span class="timestamp">[${ts}]</span><span class="seg-text">${line}</span>`;
-                                                                        frag.appendChild(div);
-                                                                    });
-                                                                    container.appendChild(frag);
-                                                                }
-                                                                function buildPlain(){ return state.transcription || ''; }
-                                                                function buildWithTimestamps(){ if(!state.segments) return buildPlain(); return (state.segments||[]).map(seg=>`[${secondsToHHMMSS(seg.start)} -> ${secondsToHHMMSS(seg.end)}] ${seg.text||''}`.trim()).join('\n'); }
-                                                                function download(content, filename, mime='text/plain'){ const blob=new Blob([content], {type:mime}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=filename; a.click(); setTimeout(()=>URL.revokeObjectURL(url), 500); }
-                                                                renderTranscript();
-                                                                const copyButton = resultContainer.querySelector('.copy-button');
-                                                                copyButton.addEventListener('click', ()=>{ const txt = state.showTimestamps && state.segments ? buildWithTimestamps() : buildPlain(); navigator.clipboard.writeText(txt);});
-                                                                document.getElementById('toggle-timestamps').addEventListener('click', (e)=>{ e.preventDefault(); if(!state.segments){ alert('Timestamps not available. Enable "Show timestamps" before starting transcription.'); return;} state.showTimestamps = !state.showTimestamps; renderTranscript(document.getElementById('search-input').value); });
-                                                                document.getElementById('search-input').addEventListener('input', (e)=>{ renderTranscript(e.target.value); });
-                                                                document.getElementById('download-plain').addEventListener('click', (e)=>{ e.preventDefault(); download(buildPlain(), 'transcript.txt'); });
-                                                                document.getElementById('download-ts').addEventListener('click', (e)=>{ e.preventDefault(); download(buildWithTimestamps(), 'transcript_with_timestamps.txt'); });
-                                progressContainer.style.display = 'none';
-                            }
-                        })
-                        .catch(err => {
+        // Source toggle
+        document.getElementById('source-file').addEventListener('change', updateSourceUI);
+        document.getElementById('source-url').addEventListener('change', updateSourceUI);
+        updateSourceUI();
+
+        function resetProgress() {
+            progressBar.style.width = '0%';
+            progressStatus.textContent = window.i18n ? window.i18n.t('common.loading') : 'Starting…';
+        }
+
+        function pollStatus(jobId) {
+            pollTimer = setInterval(() => {
+                fetch(`/transcribe_status/${jobId}`)
+                    .then(r => r.json())
+                    .then(job => {
+                        if (job.error && !job.status) {
+                            throw new Error(job.error);
+                        }
+                        const pct = typeof job.percent === 'number' ? job.percent : 0;
+                        progressBar.style.width = `${pct}%`;
+                        progressStatus.textContent = job.status || 'Working…';
+
+                        if (job.result || job.error) {
                             clearInterval(pollTimer);
                             document.getElementById('spinner').style.display = 'none';
-                            alert('Error: ' + err.message);
-                            progressContainer.style.display = 'none';
-                        });
-                }, 1000);
+                            if (job.error) {
+                                alert(job.error);
+                                progressContainer.classList.add('hidden');
+                                return;
+                            }
+                            renderResult(job.result);
+                            progressContainer.classList.add('hidden');
+                        }
+                    })
+                    .catch(err => {
+                        clearInterval(pollTimer);
+                        document.getElementById('spinner').style.display = 'none';
+                        alert('Error: ' + err.message);
+                        progressContainer.classList.add('hidden');
+                    });
+            }, 1000);
+        }
+
+        function renderResult(res) {
+            const resultContainer = document.getElementById('result-container');
+            let transcription = '';
+            let segments = null;
+            if (res && typeof res === 'object' && 'text' in res) {
+                transcription = res.text || '';
+                segments = res.segments || null;
+            } else {
+                transcription = (res ?? '').toString();
             }
 
-            form.addEventListener('submit', function(e) {
-                e.preventDefault();
-                const useFile = document.getElementById('source-file').checked;
-                const fileInput = document.getElementById('audio-file');
-                const urlInput = document.getElementById('media-url');
-                if (useFile) {
-                    if (fileInput.files.length === 0) {
-                        alert('Please choose an audio file.');
-                        return;
+            const resultHTML = `
+                <div class="card">
+                    <h2 data-i18n="transcribe.result">${window.i18n ? window.i18n.t('transcribe.result') : 'Transcription Result'}</h2>
+                    <div class="transcription-header">
+                        <div class="controls-row">
+                            <button class="button secondary" id="toggle-timestamps">
+                                <i class="fas fa-clock"></i>
+                                <span data-i18n="transcribe.toggle_timestamps">${window.i18n ? window.i18n.t('transcribe.toggle_timestamps') : 'Toggle timestamps'}</span>
+                            </button>
+                            <input class="search-input" id="search-input" type="text" placeholder="${window.i18n ? window.i18n.t('transcribe.search_placeholder') : 'Search transcript…'}" />
+                            <button class="button secondary" id="download-plain">
+                                <i class="fas fa-download"></i>
+                                <span data-i18n="common.download">${window.i18n ? window.i18n.t('common.download') : 'Download'}</span>
+                            </button>
+                            <button class="button secondary" id="download-ts">
+                                <i class="fas fa-file-download"></i>
+                                <span data-i18n="transcribe.download_ts">${window.i18n ? window.i18n.t('transcribe.download_ts') : 'Download (timestamps)'}</span>
+                            </button>
+                        </div>
+                        <button class="button secondary icon-only" id="copy-result" title="${window.i18n ? window.i18n.t('common.copy') : 'Copy'}">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                    <div class="transcription-box">
+                        <div id="transcription-render"></div>
+                    </div>
+                </div>`;
+
+            resultContainer.innerHTML = resultHTML;
+
+            const state = { showTimestamps: !!segments, transcription, segments };
+
+            function renderTranscript(filter = "") {
+                const container = document.getElementById('transcription-render');
+                container.innerHTML = '';
+                const term = (filter || "").toLowerCase().trim();
+                if (!state.segments || !state.showTimestamps) {
+                    let text = state.transcription || '';
+                    if (term) {
+                        const re = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+                        text = text.replace(re, m => `<mark>${m}</mark>`);
                     }
-                } else {
-                    const url = (urlInput.value || '').trim();
-                    if (!url) {
-                        alert('Please provide a YouTube or Twitch URL.');
-                        return;
-                    }
+                    container.innerHTML = `<p>${text}</p>`;
+                    return;
                 }
-                document.getElementById('spinner').style.display = 'block';
-                const resultContainer = document.getElementById('result-container');
-                resultContainer.innerHTML = '';
-                const formData = new FormData(form);
-                resetProgress();
-                progressContainer.classList.remove('hidden');
-                fetch('/transcribe_start', { method: 'POST', body: formData })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.error) {
-                            document.getElementById('spinner').style.display = 'none';
-                            progressContainer.classList.add('hidden');
-                            alert(data.error);
-                            return;
-                        }
-                        const jobId = data.job_id;
-                        pollStatus(jobId);
-                    })
-                    .catch(error => {
-                        document.getElementById('spinner').style.display = 'none';
-                        progressContainer.classList.add('hidden');
-                        alert('Error: ' + error);
-                    });
+                const frag = document.createDocumentFragment();
+                (state.segments || []).forEach(seg => {
+                    let line = seg.text || '';
+                    let show = true;
+                    if (term) {
+                        show = line.toLowerCase().includes(term);
+                        const re = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+                        line = line.replace(re, m => `<mark>${m}</mark>`);
+                    }
+                    if (!show) return;
+                    const div = document.createElement('div');
+                    div.className = 'segment-line';
+                    const ts = `${formatTime(seg.start)} → ${formatTime(seg.end)}`;
+                    div.innerHTML = `<span class="timestamp">[${ts}]</span><span class="seg-text">${line}</span>`;
+                    frag.appendChild(div);
+                });
+                container.appendChild(frag);
+            }
+
+            function buildPlain() { return state.transcription || ''; }
+            function buildWithTimestamps() {
+                if (!state.segments) return buildPlain();
+                return (state.segments || []).map(seg =>
+                    `[${formatTime(seg.start)} -> ${formatTime(seg.end)}] ${seg.text || ''}`.trim()
+                ).join('\n');
+            }
+
+            renderTranscript();
+
+            document.getElementById('copy-result').addEventListener('click', () => {
+                const txt = state.showTimestamps && state.segments ? buildWithTimestamps() : buildPlain();
+                copyToClipboard(txt);
             });
 
-            // Jobs UI
-            const jobsList = document.getElementById('jobs-list');
-            const jobsRefreshBtn = document.getElementById('jobs-refresh');
-            const jobsAuto = document.getElementById('jobs-autorefresh');
-
-            function renderJobs(items){
-                if (!items || !items.length){
-                    jobsList.innerHTML = '<p class="note">No jobs found.</p>';
+            document.getElementById('toggle-timestamps').addEventListener('click', (e) => {
+                e.preventDefault();
+                if (!state.segments) {
+                    alert(window.i18n ? window.i18n.t('transcribe.no_timestamps') : 'Timestamps not available. Enable "Show timestamps" before starting transcription.');
                     return;
                 }
-                const rows = items.map(j => `
-                    <div class="card" style="margin:10px 0;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
-                            <div>
-                                <div><strong>${j.id}</strong></div>
-                                <div class="note">${j.method || ''} • ${j.model || ''} • ${j.source_type || ''}</div>
-                                <div class="note">User: ${j.user_email || 'API'}</div>
-                                <div class="note">${j.started_at ? ('Started: ' + j.started_at) : ''}</div>
-                                <div class="note">Status: ${j.status || ''} • ${typeof j.percent==='number'? j.percent: 0}%</div>
-                            </div>
-                            <div class="controls-row">
-                                <button class="button secondary" data-cancel="${j.id}"><i class="fas fa-ban"></i> Cancel</button>
-                            </div>
-                        </div>
-                        <div class="progress-wrapper" style="margin-top:10px;">
-                            <div class="progress-bar" style="width:${typeof j.percent==='number'? j.percent:0}%;"></div>
-                        </div>
-                    </div>`).join('');
-                jobsList.innerHTML = rows;
-                [...jobsList.querySelectorAll('[data-cancel]')].forEach(btn=>{
-                    btn.addEventListener('click', ()=>{
-                        const id = btn.getAttribute('data-cancel');
-                        fetch(`/jobs/cancel/${id}`, { method:'POST' })
-                            .then(r=>r.json())
-                            .then(()=>loadJobs())
-                            .catch(()=>alert('Cancel failed'));
-                    });
-                });
-            }
+                state.showTimestamps = !state.showTimestamps;
+                renderTranscript(document.getElementById('search-input').value);
+            });
 
-            function loadJobs(){
-                fetch('/jobs/active').then(r=>r.json()).then(renderJobs);
-            }
-            jobsRefreshBtn.addEventListener('click', (e)=>{ e.preventDefault(); loadJobs(); });
-            jobsTimer = setInterval(()=>{ if (document.getElementById('jobs-tab').classList.contains('active') && jobsAuto.checked){ loadJobs(); } }, 2000);
+            document.getElementById('search-input').addEventListener('input', (e) => {
+                renderTranscript(e.target.value);
+            });
 
-            // History UI
-            const historyList = document.getElementById('history-list');
-            const historyDetail = document.getElementById('history-detail');
-            const historyRefreshBtn = document.getElementById('history-refresh');
+            document.getElementById('download-plain').addEventListener('click', (e) => {
+                e.preventDefault();
+                downloadFile(buildPlain(), 'transcript.txt');
+            });
 
-            function renderHistory(items){
-                if (!items || !items.length){
-                    historyList.innerHTML = '<p class="note">No history yet.</p>';
-                    historyDetail.innerHTML = '';
+            document.getElementById('download-ts').addEventListener('click', (e) => {
+                e.preventDefault();
+                downloadFile(buildWithTimestamps(), 'transcript_with_timestamps.txt');
+            });
+        }
+
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const useFile = document.getElementById('source-file').checked;
+            const fileInput = document.getElementById('audio-file');
+            const urlInput = document.getElementById('media-url');
+            if (useFile) {
+                if (fileInput.files.length === 0) {
+                    alert(window.i18n ? window.i18n.t('transcribe.error_no_file') : 'Please choose an audio file.');
                     return;
                 }
-        const table = [`<table style="width:100%; border-collapse: collapse;">
-                    <thead><tr>
-                        <th style="text-align:left; padding:6px; border-bottom:1px solid #ddd;">ID</th>
-            <th style="text-align:left; padding:6px; border-bottom:1px solid #ddd;">User</th>
-                        <th style="text-align:left; padding:6px; border-bottom:1px solid #ddd;">Status</th>
-                        <th style="text-align:left; padding:6px; border-bottom:1px solid #ddd;">Method</th>
-                        <th style="text-align:left; padding:6px; border-bottom:1px solid #ddd;">Model</th>
-                        <th style="text-align:left; padding:6px; border-bottom:1px solid #ddd;">Started</th>
-                        <th style="text-align:left; padding:6px; border-bottom:1px solid #ddd;">Finished</th>
-                        <th style="text-align:left; padding:6px; border-bottom:1px solid #ddd;">Actions</th>
-                    </tr></thead><tbody>`];
-                for (const it of items){
-                    table.push(`<tr>
-                        <td style="padding:6px; border-bottom:1px solid #eee; font-family:monospace;">${it.id}</td>
-            <td style="padding:6px; border-bottom:1px solid #eee;">${it.user_email || 'API'}</td>
-                        <td style="padding:6px; border-bottom:1px solid #eee;">${it.status}</td>
-                        <td style="padding:6px; border-bottom:1px solid #eee;">${it.method}</td>
-                        <td style="padding:6px; border-bottom:1px solid #eee;">${it.model || ''}</td>
-                        <td style="padding:6px; border-bottom:1px solid #eee;">${it.started_at || ''}</td>
-                        <td style="padding:6px; border-bottom:1px solid #eee;">${it.finished_at || ''}</td>
-                        <td style="padding:6px; border-bottom:1px solid #eee;">
-                            <button class="button secondary" data-view="${it.id}"><i class="fas fa-eye"></i> View</button>
-                            <button class="button secondary" data-delete="${it.id}"><i class="fas fa-trash"></i> Delete</button>
-                        </td>
-                    </tr>`);
+            } else {
+                const url = (urlInput.value || '').trim();
+                if (!url) {
+                    alert(window.i18n ? window.i18n.t('transcribe.error_no_url') : 'Please provide a YouTube or Twitch URL.');
+                    return;
                 }
-                table.push('</tbody></table>');
-                historyList.innerHTML = table.join('');
-                [...historyList.querySelectorAll('[data-view]')].forEach(btn=>{
-                    btn.addEventListener('click', ()=>{
-                        const id = btn.getAttribute('data-view');
-                        fetch(`/history/item/${id}`).then(r=>r.json()).then(renderHistoryDetail);
-                    });
-                });
-                [...historyList.querySelectorAll('[data-delete]')].forEach(btn=>{
-                    btn.addEventListener('click', ()=>{
-                        const id = btn.getAttribute('data-delete');
-                        if (!confirm('Delete this record?')) return;
-                        fetch(`/history/delete/${id}`, { method:'POST' })
-                            .then(()=>loadHistory())
-                            .catch(()=>alert('Delete failed'));
-                    });
-                });
             }
+            document.getElementById('spinner').style.display = 'block';
+            const resultContainer = document.getElementById('result-container');
+            resultContainer.innerHTML = '';
+            const formData = new FormData(form);
+            resetProgress();
+            progressContainer.classList.remove('hidden');
+            fetch('/transcribe_start', { method: 'POST', body: formData })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        document.getElementById('spinner').style.display = 'none';
+                        progressContainer.classList.add('hidden');
+                        alert(data.error);
+                        return;
+                    }
+                    const jobId = data.job_id;
+                    pollStatus(jobId);
+                })
+                .catch(error => {
+                    document.getElementById('spinner').style.display = 'none';
+                    progressContainer.classList.add('hidden');
+                    alert('Error: ' + error);
+                });
+        });
 
-            function secondsToHHMMSS(s){ s = Math.max(0, Math.floor(s||0)); const h=String(Math.floor(s/3600)).padStart(2,'0'); const m=String(Math.floor((s%3600)/60)).padStart(2,'0'); const ss=String(s%60).padStart(2,'0'); return `${h}:${m}:${ss}`; }
+        // Jobs UI
+        const jobsList = document.getElementById('jobs-list');
+        const jobsRefreshBtn = document.getElementById('jobs-refresh');
+        const jobsAuto = document.getElementById('jobs-autorefresh');
 
-            function renderHistoryDetail(item){
-                if (!item || item.error){ historyDetail.innerHTML = '<p class="note">No details.</p>'; return; }
-                const hasSeg = Array.isArray(item.segments) && item.segments.length>0;
-                const content = `
+        function renderJobs(items) {
+            if (!items || !items.length) {
+                jobsList.innerHTML = `<p class="note">${window.i18n ? window.i18n.t('jobs.no_jobs') : 'No jobs found.'}</p>`;
+                return;
+            }
+            const rows = items.map(j => `
+                <div class="card job-card">
+                    <div class="job-info">
+                        <div class="job-header">
+                            <strong>${j.id}</strong>
+                        </div>
+                        <div class="note">${j.method || ''} • ${j.model || ''} • ${j.source_type || ''}</div>
+                        <div class="note">${window.i18n ? window.i18n.t('jobs.user') : 'User'}: ${j.user_email || 'API'}</div>
+                        <div class="note">${j.started_at ? ((window.i18n ? window.i18n.t('jobs.started') : 'Started') + ': ' + j.started_at) : ''}</div>
+                        <div class="note">${window.i18n ? window.i18n.t('jobs.status') : 'Status'}: ${j.status || ''} • ${typeof j.percent === 'number' ? j.percent : 0}%</div>
+                    </div>
+                    <div class="job-actions">
+                        <button class="button secondary" data-cancel="${j.id}">
+                            <i class="fas fa-ban"></i>
+                            <span>${window.i18n ? window.i18n.t('jobs.cancel') : 'Cancel'}</span>
+                        </button>
+                    </div>
+                    <div class="progress-wrapper" style="margin-top:10px;">
+                        <div class="progress-bar" style="width:${typeof j.percent === 'number' ? j.percent : 0}%;"></div>
+                    </div>
+                </div>`).join('');
+            jobsList.innerHTML = rows;
+            [...jobsList.querySelectorAll('[data-cancel]')].forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = btn.getAttribute('data-cancel');
+                    fetch(`/jobs/cancel/${id}`, { method: 'POST' })
+                        .then(r => r.json())
+                        .then(() => loadJobs())
+                        .catch(() => alert('Cancel failed'));
+                });
+            });
+        }
+
+        function loadJobs() {
+            fetch('/jobs/active').then(r => r.json()).then(renderJobs);
+        }
+        jobsRefreshBtn.addEventListener('click', (e) => { e.preventDefault(); loadJobs(); });
+        jobsTimer = setInterval(() => {
+            if (document.getElementById('jobs-tab').classList.contains('active') && jobsAuto.checked) {
+                loadJobs();
+            }
+        }, 2000);
+
+        // History UI
+        const historyList = document.getElementById('history-list');
+        const historyDetail = document.getElementById('history-detail');
+        const historyRefreshBtn = document.getElementById('history-refresh');
+
+        function renderHistory(items) {
+            if (!items || !items.length) {
+                historyList.innerHTML = `<p class="note">${window.i18n ? window.i18n.t('history.no_history') : 'No history yet.'}</p>`;
+                historyDetail.innerHTML = '';
+                return;
+            }
+            const table = [`<div class="table-container"><table class="data-table">
+                <thead><tr>
+                    <th>ID</th>
+                    <th>${window.i18n ? window.i18n.t('history.user') : 'User'}</th>
+                    <th>${window.i18n ? window.i18n.t('history.status') : 'Status'}</th>
+                    <th>${window.i18n ? window.i18n.t('history.method') : 'Method'}</th>
+                    <th>${window.i18n ? window.i18n.t('history.model') : 'Model'}</th>
+                    <th>${window.i18n ? window.i18n.t('history.started') : 'Started'}</th>
+                    <th>${window.i18n ? window.i18n.t('history.finished') : 'Finished'}</th>
+                    <th>${window.i18n ? window.i18n.t('history.actions') : 'Actions'}</th>
+                </tr></thead><tbody>`];
+            for (const it of items) {
+                table.push(`<tr>
+                    <td class="monospace">${it.id}</td>
+                    <td>${it.user_email || 'API'}</td>
+                    <td><span class="status-badge status-${it.status}">${it.status}</span></td>
+                    <td>${it.method}</td>
+                    <td>${it.model || ''}</td>
+                    <td>${it.started_at || ''}</td>
+                    <td>${it.finished_at || ''}</td>
+                    <td>
+                        <button class="button secondary sm" data-view="${it.id}"><i class="fas fa-eye"></i></button>
+                        <button class="button secondary sm" data-delete="${it.id}"><i class="fas fa-trash"></i></button>
+                    </td>
+                </tr>`);
+            }
+            table.push('</tbody></table></div>');
+            historyList.innerHTML = table.join('');
+            [...historyList.querySelectorAll('[data-view]')].forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = btn.getAttribute('data-view');
+                    fetch(`/history/item/${id}`).then(r => r.json()).then(renderHistoryDetail);
+                });
+            });
+            [...historyList.querySelectorAll('[data-delete]')].forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = btn.getAttribute('data-delete');
+                    if (!confirm(window.i18n ? window.i18n.t('history.confirm_delete') : 'Delete this record?')) return;
+                    fetch(`/history/delete/${id}`, { method: 'POST' })
+                        .then(() => loadHistory())
+                        .catch(() => alert('Delete failed'));
+                });
+            });
+        }
+
+        function renderHistoryDetail(item) {
+            if (!item || item.error) {
+                historyDetail.innerHTML = `<p class="note">${window.i18n ? window.i18n.t('history.no_details') : 'No details.'}</p>`;
+                return;
+            }
+            const hasSeg = Array.isArray(item.segments) && item.segments.length > 0;
+            const content = `
                 <div class="card" style="margin-top:15px;">
                     <h3>Job ${item.id}</h3>
-                    <div class="controls-row" style="margin:10px 0;">
-                        <button class="button secondary" id="hist-copy"><i class="fas fa-copy"></i> Copy</button>
-                        <button class="button secondary" id="hist-dl-plain"><i class="fas fa-download"></i> Download (plain)</button>
-                        <button class="button secondary" id="hist-dl-ts"><i class="fas fa-file-download"></i> Download (timestamps)</button>
+                    <div class="controls-row" style="margin:15px 0;">
+                        <button class="button secondary" id="hist-copy">
+                            <i class="fas fa-copy"></i>
+                            <span>${window.i18n ? window.i18n.t('common.copy') : 'Copy'}</span>
+                        </button>
+                        <button class="button secondary" id="hist-dl-plain">
+                            <i class="fas fa-download"></i>
+                            <span>${window.i18n ? window.i18n.t('common.download') : 'Download'}</span>
+                        </button>
+                        <button class="button secondary" id="hist-dl-ts">
+                            <i class="fas fa-file-download"></i>
+                            <span>${window.i18n ? window.i18n.t('transcribe.download_ts') : 'Download (timestamps)'}</span>
+                        </button>
                     </div>
                     <div class="transcription-box"><div id="hist-render"></div></div>
                 </div>`;
-                historyDetail.innerHTML = content;
-                const render = ()=>{
-                    const container = document.getElementById('hist-render');
-                    if (!hasSeg){ container.innerText = item.text || ''; return; }
-                    const frag = document.createDocumentFragment();
-                    (item.segments||[]).forEach(seg=>{
-                        const div=document.createElement('div'); div.className='segment-line';
-                        const ts = `${secondsToHHMMSS(seg.start)} → ${secondsToHHMMSS(seg.end)}`;
-                        div.innerHTML = `<span class="timestamp">[${ts}]</span><span class="seg-text">${seg.text||''}</span>`;
-                        frag.appendChild(div);
-                    });
-                    container.innerHTML='';
-                    container.appendChild(frag);
-                };
-                const buildPlain = ()=> item.text || '';
-                const buildTS = ()=> { if (!hasSeg) return buildPlain(); return (item.segments||[]).map(seg=>`[${secondsToHHMMSS(seg.start)} -> ${secondsToHHMMSS(seg.end)}] ${seg.text||''}`.trim()).join('\n'); };
-                const download = (content, filename, mime='text/plain')=>{ const blob=new Blob([content], {type:mime}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=filename; a.click(); setTimeout(()=>URL.revokeObjectURL(url), 500); };
-                render();
-                document.getElementById('hist-copy').addEventListener('click', ()=>{ navigator.clipboard.writeText(buildPlain()); });
-                document.getElementById('hist-dl-plain').addEventListener('click', ()=>{ download(buildPlain(), 'transcript.txt'); });
-                document.getElementById('hist-dl-ts').addEventListener('click', ()=>{ download(buildTS(), 'transcript_with_timestamps.txt'); });
-            }
+            historyDetail.innerHTML = content;
 
-                        function loadHistory(){ fetch('/history/list').then(r=>r.json()).then(renderHistory); }
+            const render = () => {
+                const container = document.getElementById('hist-render');
+                if (!hasSeg) {
+                    container.innerText = item.text || '';
+                    return;
+                }
+                const frag = document.createDocumentFragment();
+                (item.segments || []).forEach(seg => {
+                    const div = document.createElement('div');
+                    div.className = 'segment-line';
+                    const ts = `${formatTime(seg.start)} → ${formatTime(seg.end)}`;
+                    div.innerHTML = `<span class="timestamp">[${ts}]</span><span class="seg-text">${seg.text || ''}</span>`;
+                    frag.appendChild(div);
+                });
+                container.innerHTML = '';
+                container.appendChild(frag);
+            };
 
-                        // Users UI
-                        const usersList = document.getElementById('users-list');
-                        const usersRefreshBtn = document.getElementById('users-refresh');
-                        function renderUsers(items){
-                                if (!items || !items.length){ usersList.innerHTML = '<p class="note">No users.</p>'; return; }
-                                const rows = items.map(u=>`
-                                <div class="card" style="margin:10px 0; display:flex; justify-content:space-between; align-items:center; gap:10px;">
-                                    <div>
-                                        <div><strong>${u.email}</strong> ${u.is_admin ? '<span class="note">(admin)</span>' : ''}</div>
-                                        <div class="note">First: ${u.first_seen || ''} • Last: ${u.last_seen || ''}</div>
-                                    </div>
-                                    <div class="controls-row">
-                                        <button class="button secondary" data-toggle-admin="${u.email}"><i class="fas fa-user-shield"></i> Toggle admin</button>
-                                    </div>
-                                </div>`).join('');
-                                usersList.innerHTML = rows;
-                                [...usersList.querySelectorAll('[data-toggle-admin]')].forEach(btn=>{
-                                        btn.addEventListener('click', ()=>{
-                                                const email = btn.getAttribute('data-toggle-admin');
-                                                fetch('/users/toggle_admin', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email }) })
-                                                        .then(r=>r.json())
-                                                        .then(res=>{ if (res.error){ alert(res.error); } else { loadUsers(); } })
-                                                        .catch(()=>alert('Toggle failed'));
-                                        });
-                                });
-                        }
-                        function loadUsers(){ if (usersList) { fetch('/users/list').then(r=>r.json()).then(renderUsers); } }
-                        if (usersRefreshBtn){ usersRefreshBtn.addEventListener('click', (e)=>{ e.preventDefault(); loadUsers(); }); }
-            historyRefreshBtn.addEventListener('click', (e)=>{ e.preventDefault(); loadHistory(); });
-        });
-    </script>
-</body>
-</html>
+            const buildPlain = () => item.text || '';
+            const buildTS = () => {
+                if (!hasSeg) return buildPlain();
+                return (item.segments || []).map(seg =>
+                    `[${formatTime(seg.start)} -> ${formatTime(seg.end)}] ${seg.text || ''}`.trim()
+                ).join('\n');
+            };
+
+            render();
+            document.getElementById('hist-copy').addEventListener('click', () => { copyToClipboard(buildPlain()); });
+            document.getElementById('hist-dl-plain').addEventListener('click', () => { downloadFile(buildPlain(), 'transcript.txt'); });
+            document.getElementById('hist-dl-ts').addEventListener('click', () => { downloadFile(buildTS(), 'transcript_with_timestamps.txt'); });
+        }
+
+        function loadHistory() {
+            fetch('/history/list').then(r => r.json()).then(renderHistory);
+        }
+        historyRefreshBtn.addEventListener('click', (e) => { e.preventDefault(); loadHistory(); });
+    });
+</script>
+{% endblock %}
