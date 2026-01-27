@@ -3,6 +3,7 @@ Admin blueprint for Whisper API STT application.
 Handles admin console, settings, user management, and API key management.
 """
 import json
+import os
 import secrets
 from datetime import datetime
 from typing import Optional
@@ -505,6 +506,12 @@ def get_stats():
             'api_keys': {
                 'total': api_key_count,
                 'active': active_api_keys
+            },
+            'system': {
+                'openai_configured': bool(os.getenv('OPENAI_API_KEY')),
+                'cloud_api_enabled': get_setting('feature_cloud_api_enabled', True),
+                'url_input_enabled': get_setting('feature_url_input_enabled', True),
+                'auth_enabled': is_auth_enabled()
             },
             'version': VERSION
         })

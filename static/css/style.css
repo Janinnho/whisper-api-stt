@@ -904,3 +904,345 @@ tr:hover {
     padding-top: 15px;
     border-top: 1px solid var(--border-light);
 }
+
+/* Main split layout */
+.main-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    height: calc(100vh - 140px);
+    min-height: 500px;
+}
+
+.panel {
+    background-color: var(--bg-card);
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow-md);
+    border: 1px solid var(--border-light);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.panel-header {
+    padding: 15px 20px;
+    border-bottom: 1px solid var(--border-light);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.panel-header h2 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: var(--text-primary);
+}
+
+.panel-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.panel-body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+/* Transcribe panel */
+.panel-transcribe .panel-body {
+    display: flex;
+    flex-direction: column;
+}
+
+.button-full {
+    width: 100%;
+}
+
+.progress-card {
+    margin-top: 20px;
+    padding: 15px;
+    background: var(--bg-hover);
+    border-radius: var(--border-radius);
+}
+
+.progress-card h4 {
+    margin: 0 0 10px 0;
+    font-size: 0.9rem;
+}
+
+.result-card {
+    margin-top: 20px;
+    padding: 15px;
+    background: var(--bg-hover);
+    border-radius: var(--border-radius);
+}
+
+.result-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.result-header h3 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.result-actions {
+    display: flex;
+    gap: 5px;
+}
+
+.result-card .search-input {
+    width: 100%;
+    margin-bottom: 10px;
+}
+
+/* Activity panel */
+.activity-section {
+    margin-bottom: 25px;
+}
+
+.activity-section:last-child {
+    margin-bottom: 0;
+}
+
+.activity-section h3 {
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+    margin: 0 0 12px 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.activity-section.empty {
+    opacity: 0.7;
+}
+
+/* Jobs list */
+.jobs-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.job-item {
+    background: var(--bg-hover);
+    border-radius: var(--border-radius-sm);
+    padding: 12px;
+    border: 1px solid var(--border-color);
+}
+
+.job-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.job-percent {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--primary-color);
+}
+
+.job-item-info {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.job-cancel {
+    margin-top: 8px;
+    width: 100%;
+}
+
+.progress-sm {
+    height: 6px;
+}
+
+/* History list */
+.history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.history-item {
+    background: var(--bg-hover);
+    border-radius: var(--border-radius-sm);
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.history-item:hover {
+    border-color: var(--primary-color);
+    background: var(--primary-light);
+}
+
+.history-item-main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 4px;
+}
+
+.history-method {
+    font-size: 0.85rem;
+    color: var(--text-primary);
+}
+
+.history-item-meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+/* Empty states */
+.empty-state-sm {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 15px;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.empty-state-sm i {
+    font-size: 1rem;
+    opacity: 0.6;
+}
+
+/* Checkbox compact */
+.checkbox-label.compact {
+    font-size: 0.8rem;
+    gap: 4px;
+}
+
+.checkbox-label.compact input {
+    width: 14px;
+    height: 14px;
+}
+
+/* Data table (for admin) */
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.data-table th,
+.data-table td {
+    text-align: left;
+    padding: 12px 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.data-table th {
+    background-color: var(--bg-hover);
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.data-table tr:hover {
+    background-color: var(--bg-hover);
+}
+
+.data-table .monospace {
+    font-family: monospace;
+    font-size: 0.8rem;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 12px;
+    text-transform: capitalize;
+}
+
+.status-badge.status-completed {
+    background-color: rgba(40, 167, 69, 0.15);
+    color: var(--success-color);
+}
+
+.status-badge.status-running,
+.status-badge.status-queued {
+    background-color: rgba(23, 162, 184, 0.15);
+    color: var(--info-color);
+}
+
+.status-badge.status-error {
+    background-color: rgba(220, 53, 69, 0.15);
+    color: var(--danger-color);
+}
+
+.status-badge.status-cancelled {
+    background-color: rgba(255, 193, 7, 0.15);
+    color: var(--warning-color);
+}
+
+/* Modal large variant */
+.modal-lg {
+    max-width: 800px;
+}
+
+.modal-overlay.hidden {
+    display: none;
+}
+
+/* Empty state */
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-secondary);
+}
+
+.empty-state i {
+    font-size: 3rem;
+    margin-bottom: 15px;
+    opacity: 0.5;
+}
+
+.empty-state p {
+    font-size: 1rem;
+}
+
+@media (max-width: 900px) {
+    .main-layout {
+        grid-template-columns: 1fr;
+        height: auto;
+        min-height: auto;
+    }
+
+    .panel {
+        max-height: none;
+    }
+
+    .panel-activity {
+        min-height: 400px;
+    }
+}
+
+@media (max-width: 768px) {
+    .data-table {
+        font-size: 0.85rem;
+    }
+
+    .data-table th,
+    .data-table td {
+        padding: 8px 6px;
+    }
+
+    .panel-header {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+}

@@ -79,6 +79,15 @@ class ApiKey(Base):
     usage_count = Column(Integer, default=0)
 
 
+class OidcState(Base):
+    """OIDC state storage for authentication flow."""
+    __tablename__ = "oidc_states"
+
+    state = Column(String(64), primary_key=True)
+    code_verifier = Column(String(128), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class TranscriptionJob(Base):
     """Transcription job records."""
     __tablename__ = "transcription_jobs"

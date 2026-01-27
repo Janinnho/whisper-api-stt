@@ -4,6 +4,7 @@
   },
   "nav": {
     "transcribe": "Transkribieren",
+    "activity": "Aktivität",
     "jobs": "Jobs",
     "history": "Verlauf",
     "users": "Benutzer",
@@ -37,6 +38,7 @@
   },
   "jobs": {
     "title": "Aktive Jobs",
+    "active_jobs": "Aktive Jobs",
     "note": "Transkriptionen werden auf dem Server fortgesetzt, auch wenn diese Seite geschlossen wird. Sie können laufende Jobs hier abbrechen.",
     "refresh": "Aktualisieren",
     "auto_refresh": "Automatisch aktualisieren",
@@ -49,7 +51,7 @@
   "history": {
     "title": "Verlauf",
     "refresh": "Aktualisieren",
-    "no_history": "Noch kein Verlauf vorhanden.",
+    "no_history": "Noch kein Verlauf vorhanden",
     "view": "Anzeigen",
     "delete": "Löschen",
     "delete_confirm": "Diesen Eintrag löschen?",
@@ -61,6 +63,7 @@
     "started": "Gestartet",
     "finished": "Beendet",
     "actions": "Aktionen",
+    "details": "Job-Details",
     "job_details": "Job-Details",
     "copy": "Kopieren",
     "download_plain": "Download (Text)",
@@ -114,6 +117,14 @@
       "oidc_client_id": "OIDC Client-ID",
       "oidc_client_secret": "OIDC Client-Secret",
       "oidc_discovery_url": "OIDC Discovery-URL"
+    },
+    "feature_settings": {
+      "title": "Funktionseinstellungen",
+      "url_input": "URL-Eingabe aktivieren (YouTube/Twitch)",
+      "url_input_desc": "Erlaubt Benutzern, von YouTube- und Twitch-URLs zu transkribieren",
+      "cloud_api": "Cloud-API aktivieren (OpenAI)",
+      "cloud_api_desc": "Erlaubt Benutzern, OpenAIs Cloud-Transkriptions-API zu verwenden",
+      "no_api_key": "OpenAI-API-Schlüssel ist nicht konfiguriert. Cloud-API funktioniert nicht."
     },
     "api_settings": {
       "title": "API-Einstellungen",
@@ -178,6 +189,9 @@
   "auth": {
     "login": "Anmelden",
     "logout": "Abmelden",
+    "logged_out": "Erfolgreich abgemeldet",
+    "logged_out_message": "Sie wurden erfolgreich abgemeldet.",
+    "back_to_home": "Zur Startseite",
     "email": "E-Mail",
     "password": "Passwort",
     "login_button": "Anmelden",
@@ -223,7 +237,8 @@
     "no": "Nein",
     "enabled": "Aktiviert",
     "disabled": "Deaktiviert",
-    "actions": "Aktionen"
+    "actions": "Aktionen",
+    "view": "Anzeigen"
   },
   "theme": {
     "light": "Hell",

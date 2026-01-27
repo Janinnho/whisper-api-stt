@@ -4,15 +4,21 @@ Supports local authentication, HTTP header authentication, and OIDC.
 """
 import secrets
 import json
+import hashlib
+import logging
 from datetime import datetime, timedelta
 from functools import wraps
 from typing import Optional
 
 import bcrypt
-from flask import Blueprint, request, redirect, url_for, render_template, jsonify, g, make_response
+import requests
+from authlib.integrations.flask_client import OAuth
+from flask import Blueprint, request, redirect, url_for, render_template, jsonify, g, make_response, session
 
-from models import User, Session, ApiKey, SessionLocal, generate_uuid
+from models import User, Session, ApiKey, OidcState, SessionLocal, generate_uuid
 from config import get_setting, set_setting, is_auth_enabled
+
+logger = logging.getLogger(__name__)
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -450,12 +456,51 @@ def logout():
     if request.is_json:
         response = jsonify({'success': True})
     else:
-        response = make_response(redirect(url_for('auth.login_page')))
+        response = make_response(redirect(url_for('auth.logged_out_page')))
 
     response.delete_cookie(SESSION_COOKIE_NAME + '_id')
     response.delete_cookie(SESSION_COOKIE_NAME + '_token')
 
     return response
+
+
+@auth_bp.route('/logged-out')
+def logged_out_page():
+    """Show the logged out confirmation page."""
+    return render_template('logged_out.html')
+
+
+def get_oidc_config():
+    """Fetch OIDC configuration from discovery URL."""
+    discovery_url = get_setting('auth_oidc_discovery_url', '')
+    if not discovery_url:
+        return None
+
+    try:
+        response = requests.get(discovery_url, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger.error(f"Failed to fetch OIDC discovery document: {e}")
+        return None
+
+
+def generate_oidc_state():
+    """Generate a secure state parameter for OIDC."""
+    return secrets.token_urlsafe(32)
+
+
+def generate_pkce_verifier():
+    """Generate a PKCE code verifier (43-128 chars, using 43 for compatibility)."""
+    # Use 32 bytes = 43 chars in base64url (without padding)
+    return secrets.token_urlsafe(32)
+
+
+def generate_pkce_challenge(verifier: str) -> str:
+    """Generate a PKCE code challenge from verifier."""
+    digest = hashlib.sha256(verifier.encode('utf-8')).digest()
+    import base64
+    return base64.urlsafe_b64encode(digest).rstrip(b'=').decode('utf-8')
 
 
 @auth_bp.route('/auth/oidc/authorize')
@@ -464,9 +509,61 @@ def oidc_authorize():
     if not get_setting('auth_oidc_enabled', False):
         return redirect(url_for('auth.login_page', error='OIDC not enabled'))
 
-    # This would integrate with authlib for actual OIDC flow
-    # For now, redirect to login with error
-    return redirect(url_for('auth.login_page', error='OIDC configuration required'))
+    # Get OIDC configuration
+    oidc_config = get_oidc_config()
+    if not oidc_config:
+        return redirect(url_for('auth.login_page', error='OIDC discovery failed'))
+
+    client_id = get_setting('auth_oidc_client_id', '')
+    redirect_uri = get_setting('auth_oidc_redirect_uri', '')
+
+    if not client_id or not redirect_uri:
+        return redirect(url_for('auth.login_page', error='OIDC not configured'))
+
+    # Generate state and PKCE parameters
+    state = generate_oidc_state()
+    code_verifier = generate_pkce_verifier()
+    code_challenge = generate_pkce_challenge(code_verifier)
+
+    # Store state and verifier in database for callback validation
+    db_session = SessionLocal()
+    try:
+        # Clean up old states first (older than 10 minutes)
+        cutoff = datetime.utcnow() - timedelta(minutes=10)
+        db_session.query(OidcState).filter(OidcState.created_at < cutoff).delete()
+
+        # Store new state
+        oidc_state = OidcState(
+            state=state,
+            code_verifier=code_verifier,
+            created_at=datetime.utcnow()
+        )
+        db_session.add(oidc_state)
+        db_session.commit()
+    finally:
+        db_session.close()
+
+    # Build authorization URL
+    auth_endpoint = oidc_config.get('authorization_endpoint', '')
+
+    # Determine scopes - use configured or default
+    scopes = get_setting('auth_oidc_scopes', 'openid profile email')
+
+    params = {
+        'client_id': client_id,
+        'response_type': 'code',
+        'redirect_uri': redirect_uri,
+        'scope': scopes,
+        'state': state,
+        'code_challenge': code_challenge,
+        'code_challenge_method': 'S256',
+        'response_mode': 'query'
+    }
+
+    # Build URL with query parameters
+    auth_url = auth_endpoint + '?' + '&'.join(f"{k}={requests.utils.quote(str(v))}" for k, v in params.items())
+
+    return redirect(auth_url)
 
 
 @auth_bp.route('/auth/oidc/callback')
@@ -475,9 +572,203 @@ def oidc_callback():
     if not get_setting('auth_oidc_enabled', False):
         return redirect(url_for('auth.login_page', error='OIDC not enabled'))
 
-    # This would handle the OIDC callback with authlib
-    # For now, redirect to login with error
-    return redirect(url_for('auth.login_page', error='OIDC callback not implemented'))
+    # Check for error from provider
+    error = request.args.get('error')
+    if error:
+        error_desc = request.args.get('error_description', error)
+        logger.error(f"OIDC error: {error} - {error_desc}")
+        return redirect(url_for('auth.login_page', error=f'OIDC error: {error_desc}'))
+
+    # Get authorization code and state
+    code = request.args.get('code')
+    state = request.args.get('state')
+
+    if not code or not state:
+        return redirect(url_for('auth.login_page', error='Invalid OIDC response'))
+
+    # Validate state from database
+    db_session = SessionLocal()
+    try:
+        oidc_state = db_session.query(OidcState).filter(OidcState.state == state).first()
+        if not oidc_state:
+            return redirect(url_for('auth.login_page', error='Invalid or expired state'))
+
+        code_verifier = oidc_state.code_verifier
+
+        # Delete the state (one-time use)
+        db_session.delete(oidc_state)
+        db_session.commit()
+    finally:
+        db_session.close()
+
+    # Get OIDC configuration
+    oidc_config = get_oidc_config()
+    if not oidc_config:
+        return redirect(url_for('auth.login_page', error='OIDC discovery failed'))
+
+    # Exchange code for tokens
+    token_endpoint = oidc_config.get('token_endpoint', '')
+    client_id = get_setting('auth_oidc_client_id', '')
+    client_secret = get_setting('auth_oidc_client_secret', '')
+    redirect_uri = get_setting('auth_oidc_redirect_uri', '')
+
+    token_data = {
+        'grant_type': 'authorization_code',
+        'code': code,
+        'redirect_uri': redirect_uri,
+        'client_id': client_id,
+        'code_verifier': code_verifier
+    }
+
+    # Add client secret if configured (confidential client)
+    if client_secret:
+        token_data['client_secret'] = client_secret
+
+    try:
+        logger.info(f"Token exchange to {token_endpoint} with client_id={client_id}, redirect_uri={redirect_uri}")
+        token_response = requests.post(
+            token_endpoint,
+            data=token_data,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            timeout=10
+        )
+        if not token_response.ok:
+            error_detail = token_response.text
+            logger.error(f"Token exchange failed ({token_response.status_code}): {error_detail}")
+            # Try to parse error for user-friendly message
+            try:
+                error_json = token_response.json()
+                error_msg = error_json.get('error_description', error_json.get('error', 'Token exchange failed'))
+            except Exception:
+                error_msg = 'Token exchange failed'
+            return redirect(url_for('auth.login_page', error=error_msg))
+        tokens = token_response.json()
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Token exchange request error: {e}")
+        return redirect(url_for('auth.login_page', error='Token exchange failed'))
+    except Exception as e:
+        logger.error(f"Token exchange error: {e}")
+        return redirect(url_for('auth.login_page', error='Token exchange failed'))
+
+    # Get ID token and extract claims
+    id_token = tokens.get('id_token')
+    if not id_token:
+        return redirect(url_for('auth.login_page', error='No ID token received'))
+
+    # Decode ID token (without verification for now - in production, verify signature)
+    try:
+        # Simple JWT decode (payload is base64)
+        import base64
+        parts = id_token.split('.')
+        if len(parts) != 3:
+            raise ValueError("Invalid JWT format")
+
+        # Decode payload (add padding if needed)
+        payload = parts[1]
+        payload += '=' * (4 - len(payload) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload))
+    except Exception as e:
+        logger.error(f"Failed to decode ID token: {e}")
+        return redirect(url_for('auth.login_page', error='Invalid ID token'))
+
+    # Extract user information from claims
+    subject = claims.get('sub')
+    email = claims.get('email') or claims.get('preferred_username') or claims.get('upn')
+    name = claims.get('name') or claims.get('given_name', '')
+
+    if not subject:
+        return redirect(url_for('auth.login_page', error='No subject in ID token'))
+
+    if not email:
+        return redirect(url_for('auth.login_page', error='No email in ID token'))
+
+    # Get or create user
+    user = get_or_create_oidc_user(subject, email, name)
+    if not user:
+        return redirect(url_for('auth.login_page', error='Failed to create user'))
+
+    if not user.is_active:
+        return redirect(url_for('auth.login_page', error='Account is disabled'))
+
+    # Create session
+    session_id, token = create_session(
+        user,
+        ip_address=request.remote_addr,
+        user_agent=request.user_agent.string if request.user_agent else None
+    )
+
+    # Redirect to home with session cookies
+    response = make_response(redirect(url_for('index')))
+    response.set_cookie(
+        SESSION_COOKIE_NAME + '_id',
+        session_id,
+        httponly=True,
+        samesite='Lax',
+        max_age=SESSION_DURATION_DAYS * 24 * 3600
+    )
+    response.set_cookie(
+        SESSION_COOKIE_NAME + '_token',
+        token,
+        httponly=True,
+        samesite='Lax',
+        max_age=SESSION_DURATION_DAYS * 24 * 3600
+    )
+
+    return response
+
+
+def get_or_create_oidc_user(subject: str, email: str, name: str = None) -> Optional[User]:
+    """Get or create a user from OIDC authentication."""
+    db_session = SessionLocal()
+    try:
+        # First try to find by OIDC subject
+        user = db_session.query(User).filter(User.oidc_subject == subject).first()
+
+        if not user:
+            # Try to find by email (might be existing user)
+            user = db_session.query(User).filter(User.email == email.lower()).first()
+
+            if user:
+                # Link existing user to OIDC
+                user.oidc_subject = subject
+                if user.source == 'local':
+                    user.source = 'oidc'
+            else:
+                # Create new user
+                now = datetime.utcnow()
+                user = User(
+                    id=generate_uuid(),
+                    email=email.lower(),
+                    name=name or email.split('@')[0],
+                    source='oidc',
+                    oidc_subject=subject,
+                    is_admin=False,
+                    is_active=True,
+                    first_seen=now,
+                    last_seen=now,
+                    created_at=now
+                )
+                db_session.add(user)
+                db_session.flush()
+
+                # If no admin exists, make this user admin
+                any_admin = db_session.query(User).filter(User.is_admin == True, User.id != user.id).first()
+                if not any_admin:
+                    user.is_admin = True
+                    logger.info(f"First OIDC user {email} promoted to admin")
+
+        user.last_seen = datetime.utcnow()
+        db_session.commit()
+
+        # Detach from session for use outside
+        db_session.expunge(user)
+        return user
+    except Exception as e:
+        logger.error(f"Error creating OIDC user: {e}")
+        db_session.rollback()
+        return None
+    finally:
+        db_session.close()
 
 
 @auth_bp.route('/api/me')

@@ -290,9 +290,11 @@ def transcribe_with_openai_api(audio_file, model="whisper-1", progress: Optional
 
 
 def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress: Optional[Callable[[str, int], None]] = None, return_segments: bool = False, cancel_check: Optional[Callable[[], bool]] = None):
-    valid_models = ["whisper-1", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"]
+    valid_models = ["whisper-1", "gpt-4o-transcribe", "gpt-4o-mini-transcribe", "gpt-4o-transcribe-diarize"]
     if model not in valid_models:
         model = "whisper-1"
+
+    is_diarize = model == "gpt-4o-transcribe-diarize"
 
     # Get settings
     max_cloud_file_mb = get_setting('max_cloud_file_mb', 20)
@@ -307,7 +309,11 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
         if progress:
             progress(f"Sending to OpenAI: {os.path.basename(file_path)}", 0)
         data_fields = [("model", model)]
-        if want_verbose:
+        if is_diarize:
+            # For diarization, we need logprobs to extract speaker info
+            data_fields.append(("response_format", "verbose_json"))
+            data_fields.append(("include_logprobs", "true"))
+        elif want_verbose:
             data_fields.append(("response_format", "verbose_json"))
             if model.startswith("gpt-4o"):
                 data_fields.append(("timestamp_granularities[]", "segment"))
@@ -324,7 +330,7 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
                 return response.json()
             except Exception:
                 return {"__error__": "Invalid JSON"}
-        if want_verbose:
+        if want_verbose or is_diarize:
             with open(file_path, "rb") as f2:
                 resp2 = requests.post(
                     "https://api.openai.com/v1/audio/transcriptions",
@@ -345,11 +351,15 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
             out = []
             for s in segs:
                 try:
-                    out.append({
+                    seg_data = {
                         "start": float(s.get("start", 0.0)),
                         "end": float(s.get("end", 0.0)),
                         "text": s.get("text", "")
-                    })
+                    }
+                    # Include speaker if available (for diarization)
+                    if "speaker" in s:
+                        seg_data["speaker"] = s.get("speaker")
+                    out.append(seg_data)
                 except Exception:
                     continue
             return out or None
@@ -358,11 +368,14 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
             out = []
             for s in ts:
                 try:
-                    out.append({
+                    seg_data = {
                         "start": float(s.get("start", 0.0)),
                         "end": float(s.get("end", 0.0)),
                         "text": s.get("text", "")
-                    })
+                    }
+                    if "speaker" in s:
+                        seg_data["speaker"] = s.get("speaker")
+                    out.append(seg_data)
                 except Exception:
                     continue
             return out or None
@@ -373,11 +386,14 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
                 out = []
                 for s in segs2:
                     try:
-                        out.append({
+                        seg_data = {
                             "start": float(s.get("start", 0.0)),
                             "end": float(s.get("end", 0.0)),
                             "text": s.get("text", "")
-                        })
+                        }
+                        if "speaker" in s:
+                            seg_data["speaker"] = s.get("speaker")
+                        out.append(seg_data)
                     except Exception:
                         continue
                 return out or None
@@ -386,15 +402,67 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
             out = []
             for w in words:
                 try:
-                    out.append({
+                    seg_data = {
                         "start": float(w.get("start", 0.0)),
                         "end": float(w.get("end", 0.0)),
                         "text": w.get("word", w.get("text", ""))
-                    })
+                    }
+                    if "speaker" in w:
+                        seg_data["speaker"] = w.get("speaker")
+                    out.append(seg_data)
                 except Exception:
                     continue
             return out or None
         return None
+
+    def _extract_diarization(api_resp: dict):
+        """Extract diarization data from gpt-4o-transcribe-diarize response."""
+        if not isinstance(api_resp, dict):
+            return None
+
+        # The diarize model returns logprobs with speaker tokens
+        logprobs = api_resp.get("logprobs")
+        if not logprobs:
+            return None
+
+        segments = []
+        current_speaker = None
+        current_text = []
+        current_start = 0.0
+        current_end = 0.0
+
+        for item in logprobs:
+            token = item.get("token", "")
+            # Speaker tokens look like <|speaker_1|>, <|speaker_2|>, etc.
+            if token.startswith("<|speaker_") and token.endswith("|>"):
+                # Save previous segment if exists
+                if current_text and current_speaker:
+                    segments.append({
+                        "speaker": current_speaker,
+                        "start": current_start,
+                        "end": current_end,
+                        "text": "".join(current_text).strip()
+                    })
+                    current_text = []
+                # Extract speaker name
+                current_speaker = token[2:-2]  # Remove <| and |>
+                current_start = item.get("start", current_end)
+            elif not token.startswith("<|") and not token.endswith("|>"):
+                # Regular text token
+                current_text.append(token)
+                if "end" in item:
+                    current_end = item.get("end", current_end)
+
+        # Don't forget the last segment
+        if current_text and current_speaker:
+            segments.append({
+                "speaker": current_speaker,
+                "start": current_start,
+                "end": current_end,
+                "text": "".join(current_text).strip()
+            })
+
+        return segments if segments else None
 
     def _ffprobe_duration_seconds(file_path: str) -> float:
         try:
@@ -409,12 +477,27 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
     if size_mb <= max_cloud_file_mb:
         if progress:
             progress("Direct upload to OpenAI", 10)
-        resp = _send_to_openai(input_path, want_verbose=return_segments)
+        resp = _send_to_openai(input_path, want_verbose=return_segments or is_diarize)
         if "__error__" in resp:
             return f"Transcription error: {resp['__error__']}"
         if progress:
             progress("Done", 100)
         text = resp.get("text", "")
+
+        # For diarization model, always try to extract speaker segments
+        if is_diarize:
+            diarization_segments = _extract_diarization(resp)
+            if diarization_segments:
+                # Build text with speaker labels
+                formatted_text = "\n".join([
+                    f"[{seg.get('speaker', 'Unknown')}]: {seg.get('text', '')}"
+                    for seg in diarization_segments
+                ])
+                return {"text": formatted_text or text or "No transcription found.", "segments": diarization_segments, "has_speakers": True}
+            # Fallback to regular segments if diarization extraction fails
+            segments = _extract_segments(resp)
+            return {"text": text or "No transcription found.", "segments": segments, "has_speakers": False}
+
         if not return_segments:
             return text or "No transcription found."
         segments = _extract_segments(resp)
@@ -453,36 +536,72 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
     cumulative_offset = 0.0
     chunk_durations = [
         _ffprobe_duration_seconds(p) for p in chunks
-    ] if return_segments else None
+    ] if return_segments or is_diarize else None
     total = len(chunks)
+    has_speakers = False
+
     for idx, chunk_path in enumerate(chunks, start=1):
         if cancel_check and cancel_check():
             return "Cancelled"
         if progress:
             percent = 10 + int(85 * (idx - 1) / total)
             progress(f"Transcribing chunk {idx}/{total}", percent)
-        resp = _send_to_openai(chunk_path, override_content_type="audio/mpeg", want_verbose=return_segments)
+        resp = _send_to_openai(chunk_path, override_content_type="audio/mpeg", want_verbose=return_segments or is_diarize)
         if "__error__" in resp:
             return f"Transcription error on chunk {idx}/{total}: {resp['__error__']}"
         chunk_text = resp.get("text", "")
         parts.append(chunk_text.strip())
-        if return_segments:
+
+        if is_diarize:
+            # Try to extract diarization segments
+            diarization_segs = _extract_diarization(resp)
+            if diarization_segs:
+                has_speakers = True
+                for s in diarization_segs:
+                    start = float(s.get("start", 0.0)) + cumulative_offset
+                    end = float(s.get("end", 0.0)) + cumulative_offset
+                    all_segments.append({
+                        "start": start,
+                        "end": end,
+                        "text": s.get("text", ""),
+                        "speaker": s.get("speaker")
+                    })
+            else:
+                # Fallback to regular segments
+                for s in (_extract_segments(resp) or []):
+                    start = float(s.get("start", 0.0)) + cumulative_offset
+                    end = float(s.get("end", 0.0)) + cumulative_offset
+                    all_segments.append({"start": start, "end": end, "text": s.get("text", "")})
+        elif return_segments:
             for s in (_extract_segments(resp) or []):
                 start = float(s.get("start", 0.0)) + cumulative_offset
                 end = float(s.get("end", 0.0)) + cumulative_offset
-                all_segments.append({"start": start, "end": end, "text": s.get("text", "")})
-            if chunk_durations and len(chunk_durations) >= idx:
-                cumulative_offset += float(chunk_durations[idx-1] or 0.0)
-            else:
-                cumulative_offset += float(chunk_duration)
+                seg_data = {"start": start, "end": end, "text": s.get("text", "")}
+                if "speaker" in s:
+                    seg_data["speaker"] = s.get("speaker")
+                all_segments.append(seg_data)
 
-    merged = "\n\n".join([p for p in parts if p])
+        if chunk_durations and len(chunk_durations) >= idx:
+            cumulative_offset += float(chunk_durations[idx-1] or 0.0)
+        else:
+            cumulative_offset += float(chunk_duration)
+
     if progress:
         progress("Done", 100)
     shutil.rmtree(tmpdir, ignore_errors=True)
-    if not return_segments:
+
+    # For diarization, format text with speaker labels
+    if is_diarize and has_speakers and all_segments:
+        formatted_text = "\n".join([
+            f"[{seg.get('speaker', 'Unknown')}]: {seg.get('text', '')}"
+            for seg in all_segments
+        ])
+        return {"text": formatted_text or "No transcription found.", "segments": all_segments, "has_speakers": True}
+
+    merged = "\n\n".join([p for p in parts if p])
+    if not return_segments and not is_diarize:
         return merged or "No transcription found."
-    return {"text": merged or "No transcription found.", "segments": all_segments or None}
+    return {"text": merged or "No transcription found.", "segments": all_segments or None, "has_speakers": has_speakers}
 
 
 def _is_supported_media_url(url: str) -> bool:
@@ -646,6 +765,8 @@ def index():
         if request.form.get("action") == "save_settings":
             set_setting('api_default_model', request.form.get("api_model", "base"),
                        g.user.email if g.get('user') else None)
+            url_input_enabled = get_setting('feature_url_input_enabled', True)
+            cloud_api_enabled = get_setting('feature_cloud_api_enabled', True)
             return render_template(
                 "index.html",
                 transcription=transcription,
@@ -653,7 +774,8 @@ def index():
                 local_model_size=local_model_size,
                 cloud_model=cloud_model,
                 api_model=get_setting('api_default_model', 'base'),
-                cloud_available=cloud_available,
+                cloud_available=cloud_available and cloud_api_enabled,
+                url_input_enabled=url_input_enabled,
                 settings_saved=True,
                 version=VERSION,
                 user=g.get('user'),
@@ -687,6 +809,10 @@ def index():
             except Exception as e:
                 transcription = f"Transcription error: {str(e)}"
 
+    # Check feature settings
+    url_input_enabled = get_setting('feature_url_input_enabled', True)
+    cloud_api_enabled = get_setting('feature_cloud_api_enabled', True)
+
     return render_template(
         "index.html",
         transcription=transcription,
@@ -694,7 +820,8 @@ def index():
         local_model_size=local_model_size,
         cloud_model=cloud_model,
         api_model=get_setting('api_default_model', 'base'),
-        cloud_available=cloud_available,
+        cloud_available=cloud_available and cloud_api_enabled,
+        url_input_enabled=url_input_enabled,
         version=VERSION,
         user=g.get('user'),
         auth_enabled=is_auth_enabled(),

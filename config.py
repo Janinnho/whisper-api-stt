@@ -30,6 +30,10 @@ DEFAULT_SETTINGS = {
     "reencode_bitrate": {"value": "64k", "type": "string", "category": "api"},
     "job_timeout_seconds": {"value": "43200", "type": "integer", "category": "api"},
 
+    # Feature settings
+    "feature_url_input_enabled": {"value": "true", "type": "boolean", "category": "features"},
+    "feature_cloud_api_enabled": {"value": "true", "type": "boolean", "category": "features"},
+
     # System settings
     "setup_completed": {"value": "false", "type": "boolean", "category": "system"},
 }

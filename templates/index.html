@@ -3,175 +3,142 @@
 {% block title %}Whisper Transcription{% endblock %}
 
 {% block content %}
-<div class="tabs">
-    <button class="tab active" onclick="openTab(event, 'transcribe-tab')" data-i18n="nav.transcribe">Transcribe</button>
-    <button class="tab" onclick="openTab(event, 'jobs-tab')" data-i18n="nav.jobs">Jobs</button>
-    <button class="tab" onclick="openTab(event, 'history-tab')" data-i18n="nav.history">History</button>
-    {% if user and user.is_admin %}
-    <a href="/admin" class="tab" data-i18n="nav.admin">Admin</a>
-    {% endif %}
-    <button class="tab" onclick="openTab(event, 'settings-tab')" data-i18n="nav.settings">Settings</button>
-</div>
-
-<!-- Transcribe Tab -->
-<div id="transcribe-tab" class="tab-content active">
-    <div class="card">
-        <form id="transcription-form" method="POST" enctype="multipart/form-data">
-            <div class="form-group">
-                <label data-i18n="transcribe.input_source">Input Source:</label>
-                <div class="radio-group">
-                    <label class="radio-label">
-                        <input type="radio" name="input_source" value="file" id="source-file" checked>
-                        <span data-i18n="transcribe.file_upload">File upload</span>
-                    </label>
-                    <label class="radio-label">
-                        <input type="radio" name="input_source" value="url" id="source-url">
-                        <span data-i18n="transcribe.url_input">YouTube/Twitch URL</span>
-                    </label>
+<div class="main-layout">
+    <!-- Left Panel: Transcription -->
+    <div class="panel panel-transcribe">
+        <div class="panel-header">
+            <h2 data-i18n="nav.transcribe">Transcribe</h2>
+        </div>
+        <div class="panel-body">
+            <form id="transcription-form" method="POST" enctype="multipart/form-data">
+                {% if url_input_enabled %}
+                <div class="form-group">
+                    <label data-i18n="transcribe.input_source">Input Source:</label>
+                    <div class="radio-group">
+                        <label class="radio-label">
+                            <input type="radio" name="input_source" value="file" id="source-file" checked>
+                            <span data-i18n="transcribe.file_upload">File upload</span>
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="input_source" value="url" id="source-url">
+                            <span data-i18n="transcribe.url_input">YouTube/Twitch URL</span>
+                        </label>
+                    </div>
                 </div>
-                <div class="note" data-i18n="transcribe.source_note">Provide either an audio file or a media URL. URLs from YouTube and Twitch are supported.</div>
+                {% else %}
+                <input type="hidden" name="input_source" value="file" id="source-file-hidden">
+                {% endif %}
+
+                <div class="form-group">
+                    <label for="transcription-method" data-i18n="transcribe.method">Transcription Method:</label>
+                    <select name="transcription_method" id="transcription-method" onchange="updateModelOptions()">
+                        <option value="local" {% if selected_method == 'local' %}selected{% endif %} data-i18n="transcribe.local_model">Local Whisper Model</option>
+                        {% if cloud_available %}
+                        <option value="cloud" {% if selected_method == 'cloud' %}selected{% endif %} data-i18n="transcribe.cloud_api">OpenAI Cloud API</option>
+                        {% endif %}
+                    </select>
+                </div>
+
+                <div class="form-group" id="local-model-group" {% if selected_method == 'cloud' %}style="display:none"{% endif %}>
+                    <label for="local-model-size" data-i18n="transcribe.model_size">Local Model Size:</label>
+                    <select name="local_model_size" id="local-model-size">
+                        <option value="tiny" {% if local_model_size == 'tiny' %}selected{% endif %}>tiny</option>
+                        <option value="base" {% if local_model_size == 'base' or not local_model_size %}selected{% endif %}>base</option>
+                        <option value="small" {% if local_model_size == 'small' %}selected{% endif %}>small</option>
+                        <option value="medium" {% if local_model_size == 'medium' %}selected{% endif %}>medium</option>
+                        <option value="large" {% if local_model_size == 'large' %}selected{% endif %}>large</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="cloud-model-group" {% if selected_method != 'cloud' %}style="display:none"{% endif %}>
+                    <label for="cloud-model" data-i18n="transcribe.cloud_model">Cloud Model:</label>
+                    <select name="cloud_model" id="cloud-model">
+                        <option value="whisper-1" {% if cloud_model == 'whisper-1' or not cloud_model %}selected{% endif %}>whisper-1</option>
+                        <option value="gpt-4o-transcribe" {% if cloud_model == 'gpt-4o-transcribe' %}selected{% endif %}>gpt-4o-transcribe</option>
+                        <option value="gpt-4o-mini-transcribe" {% if cloud_model == 'gpt-4o-mini-transcribe' %}selected{% endif %}>gpt-4o-mini-transcribe</option>
+                        <option value="gpt-4o-transcribe-diarize" {% if cloud_model == 'gpt-4o-transcribe-diarize' %}selected{% endif %}>gpt-4o-transcribe-diarize (Speakers)</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="file-group">
+                    <label for="audio-file" data-i18n="transcribe.upload_file">Upload Audio File:</label>
+                    <input type="file" name="audio_file" id="audio-file" accept="audio/*">
+                </div>
+
+                <div class="form-group hidden" id="url-group">
+                    <label for="media-url" data-i18n="transcribe.media_url">Media URL (YouTube or Twitch):</label>
+                    <input type="url" name="media_url" id="media-url" placeholder="https://www.youtube.com/watch?v=...">
+                </div>
+
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="with-timestamps" name="with_timestamps">
+                        <span data-i18n="transcribe.timestamps">Show timestamps</span>
+                    </label>
+                    <div id="timestamps-note" class="note hidden" data-i18n="transcribe.timestamps_note">Timestamps are not supported by gpt-4o-transcribe or gpt-4o-mini-transcribe.</div>
+                </div>
+
+                <button type="submit" class="button button-full">
+                    <i class="fas fa-play"></i>
+                    <span data-i18n="transcribe.button">Transcribe</span>
+                </button>
+            </form>
+
+            <div id="spinner" class="spinner hidden">
+                <i class="fas fa-circle-notch fa-spin fa-3x"></i>
+                <p data-i18n="transcribe.processing">Transcribing...</p>
             </div>
 
-            <div class="form-group">
-                <label for="transcription-method" data-i18n="transcribe.method">Transcription Method:</label>
-                <select name="transcription_method" id="transcription-method" onchange="updateModelOptions()">
-                    <option value="local" {% if selected_method == 'local' %}selected{% endif %} data-i18n="transcribe.local_model">Local Whisper Model</option>
-                    {% if cloud_available %}
-                    <option value="cloud" {% if selected_method == 'cloud' %}selected{% endif %} data-i18n="transcribe.cloud_api">OpenAI Cloud API</option>
-                    {% endif %}
-                </select>
+            <div id="progress-container" class="progress-card hidden">
+                <h4 data-i18n="transcribe.progress">Progress</h4>
+                <div class="progress-wrapper">
+                    <div id="progress-bar" class="progress-bar"></div>
+                </div>
+                <p id="progress-status" class="progress-status" data-i18n="common.loading">Starting…</p>
             </div>
 
-            <div class="form-group" id="local-model-group" {% if selected_method == 'cloud' %}style="display:none"{% endif %}>
-                <label for="local-model-size" data-i18n="transcribe.model_size">Local Model Size:</label>
-                <select name="local_model_size" id="local-model-size">
-                    <option value="tiny" {% if local_model_size == 'tiny' %}selected{% endif %}>tiny</option>
-                    <option value="base" {% if local_model_size == 'base' or not local_model_size %}selected{% endif %}>base</option>
-                    <option value="small" {% if local_model_size == 'small' %}selected{% endif %}>small</option>
-                    <option value="medium" {% if local_model_size == 'medium' %}selected{% endif %}>medium</option>
-                    <option value="large" {% if local_model_size == 'large' %}selected{% endif %}>large</option>
-                </select>
-            </div>
+            <div id="result-container"></div>
+        </div>
+    </div>
 
-            <div class="form-group" id="cloud-model-group" {% if selected_method != 'cloud' %}style="display:none"{% endif %}>
-                <label for="cloud-model" data-i18n="transcribe.cloud_model">Cloud Model:</label>
-                <select name="cloud_model" id="cloud-model">
-                    <option value="whisper-1" {% if cloud_model == 'whisper-1' or not cloud_model %}selected{% endif %}>whisper-1</option>
-                    <option value="gpt-4o-transcribe" {% if cloud_model == 'gpt-4o-transcribe' %}selected{% endif %}>gpt-4o-transcribe</option>
-                    <option value="gpt-4o-mini-transcribe" {% if cloud_model == 'gpt-4o-mini-transcribe' %}selected{% endif %}>gpt-4o-mini-transcribe</option>
-                </select>
-            </div>
-
-            <div class="form-group" id="file-group">
-                <label for="audio-file" data-i18n="transcribe.upload_file">Upload Audio File:</label>
-                <input type="file" name="audio_file" id="audio-file" accept="audio/*">
-            </div>
-
-            <div class="form-group hidden" id="url-group">
-                <label for="media-url" data-i18n="transcribe.media_url">Media URL (YouTube or Twitch):</label>
-                <input type="url" name="media_url" id="media-url" placeholder="https://www.youtube.com/watch?v=...">
-            </div>
-
-            <div class="form-group">
-                <label class="checkbox-label">
-                    <input type="checkbox" id="with-timestamps" name="with_timestamps">
-                    <span data-i18n="transcribe.timestamps">Show timestamps</span>
+    <!-- Right Panel: Activity -->
+    <div class="panel panel-activity">
+        <div class="panel-header">
+            <h2 data-i18n="nav.activity">Activity</h2>
+            <div class="panel-controls">
+                <button class="button secondary sm" id="activity-refresh" title="Refresh">
+                    <i class="fas fa-sync"></i>
+                </button>
+                <label class="checkbox-label compact">
+                    <input type="checkbox" id="jobs-autorefresh" checked>
+                    <span>Auto</span>
                 </label>
-                <div id="timestamps-note" class="note hidden" data-i18n="transcribe.timestamps_note">Timestamps are not supported by gpt-4o-transcribe or gpt-4o-mini-transcribe. Please use whisper-1 or a local model if you need timestamps.</div>
+            </div>
+        </div>
+        <div class="panel-body">
+            <!-- Active Jobs Section -->
+            <div class="activity-section" id="active-jobs-section">
+                <h3 data-i18n="jobs.active_jobs">Active Jobs</h3>
+                <div id="jobs-list" class="jobs-list"></div>
             </div>
 
-            <button type="submit" class="button">
-                <i class="fas fa-play"></i>
-                <span data-i18n="transcribe.button">Transcribe</span>
-            </button>
-        </form>
-
-        <div id="spinner" class="spinner">
-            <i class="fas fa-circle-notch fa-spin fa-3x"></i>
-            <p data-i18n="transcribe.processing">Transcribing... This may take a while depending on the file size and model.</p>
-        </div>
-
-        <div id="progress-container" class="card progress-card hidden">
-            <h3 data-i18n="transcribe.progress">Progress</h3>
-            <div class="progress-wrapper">
-                <div id="progress-bar" class="progress-bar"></div>
+            <!-- History Section -->
+            <div class="activity-section">
+                <h3 data-i18n="history.title">History</h3>
+                <div id="history-list" class="history-list"></div>
             </div>
-            <p id="progress-status" class="progress-status" data-i18n="common.loading">Starting…</p>
         </div>
-    </div>
-
-    <div id="result-container"></div>
-</div>
-
-<!-- Jobs Tab -->
-<div id="jobs-tab" class="tab-content">
-    <div class="card">
-        <h2 data-i18n="jobs.active_jobs">Active Jobs</h2>
-        <div class="note" data-i18n="jobs.note">Transcriptions continue on the server even if this page is closed. You can cancel running jobs here.</div>
-        <div class="controls-row" style="margin: 15px 0;">
-            <button class="button secondary" id="jobs-refresh">
-                <i class="fas fa-sync"></i>
-                <span data-i18n="common.refresh">Refresh</span>
-            </button>
-            <label class="checkbox-label">
-                <input type="checkbox" id="jobs-autorefresh" checked>
-                <span data-i18n="jobs.auto_refresh">Auto-refresh</span>
-            </label>
-        </div>
-        <div id="jobs-list"></div>
     </div>
 </div>
 
-<!-- History Tab -->
-<div id="history-tab" class="tab-content">
-    <div class="card">
-        <h2 data-i18n="history.title">History</h2>
-        <div class="controls-row" style="margin: 15px 0;">
-            <button class="button secondary" id="history-refresh">
-                <i class="fas fa-sync"></i>
-                <span data-i18n="common.refresh">Refresh</span>
-            </button>
+<!-- History Detail Modal -->
+<div id="history-detail-modal" class="modal-overlay hidden">
+    <div class="modal modal-lg">
+        <div class="modal-header">
+            <h3 data-i18n="history.details">Job Details</h3>
+            <button class="modal-close" id="close-history-detail">&times;</button>
         </div>
-        <div id="history-list"></div>
         <div id="history-detail"></div>
-    </div>
-</div>
-
-<!-- Settings Tab -->
-<div id="settings-tab" class="tab-content">
-    <div class="card">
-        <h2 data-i18n="settings.api_settings">API Settings</h2>
-        <p data-i18n="settings.api_description">Configure which local model to use when receiving API requests with the model="whisper-1" parameter.</p>
-
-        {% if settings_saved %}
-        <div class="alert alert-success">
-            <i class="fas fa-check-circle"></i>
-            <span data-i18n="common.success">Settings saved successfully!</span>
-        </div>
-        {% endif %}
-
-        <form method="POST" id="settings-form">
-            <input type="hidden" name="action" value="save_settings">
-            <input type="hidden" name="transcription_method" value="{{ selected_method }}">
-            <input type="hidden" name="local_model_size" value="{{ local_model_size }}">
-            <input type="hidden" name="cloud_model" value="{{ cloud_model }}">
-
-            <div class="form-group">
-                <label for="api-model" data-i18n="settings.default_api_model">Default API Model:</label>
-                <select name="api_model" id="api-model">
-                    <option value="tiny" {% if api_model == 'tiny' %}selected{% endif %}>tiny</option>
-                    <option value="base" {% if api_model == 'base' or not api_model %}selected{% endif %}>base</option>
-                    <option value="small" {% if api_model == 'small' %}selected{% endif %}>small</option>
-                    <option value="medium" {% if api_model == 'medium' %}selected{% endif %}>medium</option>
-                    <option value="large" {% if api_model == 'large' %}selected{% endif %}>large</option>
-                </select>
-            </div>
-
-            <button type="submit" class="button">
-                <i class="fas fa-save"></i>
-                <span data-i18n="common.save">Save Settings</span>
-            </button>
-        </form>
     </div>
 </div>
 {% endblock %}
@@ -215,17 +182,27 @@
     }
 
     function updateSourceUI() {
-        const sourceFile = document.getElementById('source-file').checked;
+        const sourceFileEl = document.getElementById('source-file');
         const fileGroup = document.getElementById('file-group');
         const urlGroup = document.getElementById('url-group');
         const fileInput = document.getElementById('audio-file');
         const urlInput = document.getElementById('media-url');
+
+        // If URL input is disabled (elements don't exist), always show file input
+        if (!sourceFileEl || !urlGroup) {
+            if (fileGroup) fileGroup.classList.remove('hidden');
+            return;
+        }
+
+        const sourceFile = sourceFileEl.checked;
         if (sourceFile) {
             fileGroup.classList.remove('hidden');
             urlGroup.classList.add('hidden');
             fileInput.required = false;
-            urlInput.required = false;
-            urlInput.value = '';
+            if (urlInput) {
+                urlInput.required = false;
+                urlInput.value = '';
+            }
         } else {
             fileGroup.classList.add('hidden');
             urlGroup.classList.remove('hidden');
@@ -239,18 +216,22 @@
         const progressBar = document.getElementById('progress-bar');
         const progressStatus = document.getElementById('progress-status');
         let pollTimer = null;
-        let jobsTimer = null;
+        let activityTimer = null;
 
-        // Initialize timestamp availability and react to model changes
+        // Initialize
         updateTimestampAvailability();
         const cloudModelSel = document.getElementById('cloud-model');
         if (cloudModelSel) {
             cloudModelSel.addEventListener('change', updateTimestampAvailability);
         }
 
-        // Source toggle
-        document.getElementById('source-file').addEventListener('change', updateSourceUI);
-        document.getElementById('source-url').addEventListener('change', updateSourceUI);
+        // Source toggle (only if URL input is enabled)
+        const sourceFileEl = document.getElementById('source-file');
+        const sourceUrlEl = document.getElementById('source-url');
+        if (sourceFileEl && sourceUrlEl) {
+            sourceFileEl.addEventListener('change', updateSourceUI);
+            sourceUrlEl.addEventListener('change', updateSourceUI);
+        }
         updateSourceUI();
 
         function resetProgress() {
@@ -272,7 +253,7 @@
 
                         if (job.result || job.error) {
                             clearInterval(pollTimer);
-                            document.getElementById('spinner').style.display = 'none';
+                            document.getElementById('spinner').classList.add('hidden');
                             if (job.error) {
                                 alert(job.error);
                                 progressContainer.classList.add('hidden');
@@ -280,11 +261,12 @@
                             }
                             renderResult(job.result);
                             progressContainer.classList.add('hidden');
+                            loadActivity(); // Refresh activity
                         }
                     })
                     .catch(err => {
                         clearInterval(pollTimer);
-                        document.getElementById('spinner').style.display = 'none';
+                        document.getElementById('spinner').classList.add('hidden');
                         alert('Error: ' + err.message);
                         progressContainer.classList.add('hidden');
                     });
@@ -295,36 +277,32 @@
             const resultContainer = document.getElementById('result-container');
             let transcription = '';
             let segments = null;
+            let hasSpeakers = false;
             if (res && typeof res === 'object' && 'text' in res) {
                 transcription = res.text || '';
                 segments = res.segments || null;
+                hasSpeakers = res.has_speakers || false;
             } else {
                 transcription = (res ?? '').toString();
             }
 
             const resultHTML = `
-                <div class="card">
-                    <h2 data-i18n="transcribe.result">${window.i18n ? window.i18n.t('transcribe.result') : 'Transcription Result'}</h2>
-                    <div class="transcription-header">
-                        <div class="controls-row">
-                            <button class="button secondary" id="toggle-timestamps">
+                <div class="result-card">
+                    <div class="result-header">
+                        <h3 data-i18n="transcribe.result">${window.i18n ? window.i18n.t('transcribe.result') : 'Result'}</h3>
+                        <div class="result-actions">
+                            <button class="button secondary sm" id="toggle-timestamps" title="Toggle timestamps/speakers">
                                 <i class="fas fa-clock"></i>
-                                <span data-i18n="transcribe.toggle_timestamps">${window.i18n ? window.i18n.t('transcribe.toggle_timestamps') : 'Toggle timestamps'}</span>
                             </button>
-                            <input class="search-input" id="search-input" type="text" placeholder="${window.i18n ? window.i18n.t('transcribe.search_placeholder') : 'Search transcript…'}" />
-                            <button class="button secondary" id="download-plain">
+                            <button class="button secondary sm" id="copy-result" title="Copy">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                            <button class="button secondary sm" id="download-plain" title="Download">
                                 <i class="fas fa-download"></i>
-                                <span data-i18n="common.download">${window.i18n ? window.i18n.t('common.download') : 'Download'}</span>
-                            </button>
-                            <button class="button secondary" id="download-ts">
-                                <i class="fas fa-file-download"></i>
-                                <span data-i18n="transcribe.download_ts">${window.i18n ? window.i18n.t('transcribe.download_ts') : 'Download (timestamps)'}</span>
                             </button>
                         </div>
-                        <button class="button secondary icon-only" id="copy-result" title="${window.i18n ? window.i18n.t('common.copy') : 'Copy'}">
-                            <i class="fas fa-copy"></i>
-                        </button>
                     </div>
+                    <input class="search-input" id="search-input" type="text" placeholder="${window.i18n ? window.i18n.t('transcribe.search_placeholder') : 'Search…'}" />
                     <div class="transcription-box">
                         <div id="transcription-render"></div>
                     </div>
@@ -332,21 +310,50 @@
 
             resultContainer.innerHTML = resultHTML;
 
-            const state = { showTimestamps: !!segments, transcription, segments };
+            const state = { showTimestamps: !!segments, transcription, segments, hasSpeakers };
+
+            // Speaker colors for visual distinction
+            const speakerColors = [
+                '#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6',
+                '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'
+            ];
+            const speakerColorMap = {};
+            let colorIndex = 0;
+
+            function getSpeakerColor(speaker) {
+                if (!speakerColorMap[speaker]) {
+                    speakerColorMap[speaker] = speakerColors[colorIndex % speakerColors.length];
+                    colorIndex++;
+                }
+                return speakerColorMap[speaker];
+            }
+
+            function formatSpeakerLabel(speaker) {
+                // Convert speaker_1 to Speaker 1, etc.
+                if (!speaker) return 'Unknown';
+                return speaker.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            }
 
             function renderTranscript(filter = "") {
                 const container = document.getElementById('transcription-render');
                 container.innerHTML = '';
                 const term = (filter || "").toLowerCase().trim();
+
                 if (!state.segments || !state.showTimestamps) {
                     let text = state.transcription || '';
                     if (term) {
                         const re = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
                         text = text.replace(re, m => `<mark>${m}</mark>`);
                     }
-                    container.innerHTML = `<p>${text}</p>`;
+                    // For diarization plain text, preserve newlines
+                    if (state.hasSpeakers) {
+                        container.innerHTML = `<pre style="white-space: pre-wrap; font-family: inherit;">${text}</pre>`;
+                    } else {
+                        container.innerHTML = `<p>${text}</p>`;
+                    }
                     return;
                 }
+
                 const frag = document.createDocumentFragment();
                 (state.segments || []).forEach(seg => {
                     let line = seg.text || '';
@@ -357,10 +364,25 @@
                         line = line.replace(re, m => `<mark>${m}</mark>`);
                     }
                     if (!show) return;
+
                     const div = document.createElement('div');
                     div.className = 'segment-line';
-                    const ts = `${formatTime(seg.start)} → ${formatTime(seg.end)}`;
-                    div.innerHTML = `<span class="timestamp">[${ts}]</span><span class="seg-text">${line}</span>`;
+
+                    if (state.hasSpeakers && seg.speaker) {
+                        // Diarization mode with speakers
+                        const color = getSpeakerColor(seg.speaker);
+                        const speakerLabel = formatSpeakerLabel(seg.speaker);
+                        const ts = `${formatTime(seg.start)} → ${formatTime(seg.end)}`;
+                        div.innerHTML = `
+                            <span class="speaker-badge" style="background-color: ${color}; color: white; padding: 2px 8px; border-radius: 4px; margin-right: 8px; font-size: 0.85em;">${speakerLabel}</span>
+                            <span class="timestamp" style="margin-right: 8px;">[${ts}]</span>
+                            <span class="seg-text">${line}</span>
+                        `;
+                    } else {
+                        // Normal timestamp mode
+                        const ts = `${formatTime(seg.start)} → ${formatTime(seg.end)}`;
+                        div.innerHTML = `<span class="timestamp">[${ts}]</span><span class="seg-text">${line}</span>`;
+                    }
                     frag.appendChild(div);
                 });
                 container.appendChild(frag);
@@ -369,9 +391,13 @@
             function buildPlain() { return state.transcription || ''; }
             function buildWithTimestamps() {
                 if (!state.segments) return buildPlain();
-                return (state.segments || []).map(seg =>
-                    `[${formatTime(seg.start)} -> ${formatTime(seg.end)}] ${seg.text || ''}`.trim()
-                ).join('\n');
+                return (state.segments || []).map(seg => {
+                    const ts = `[${formatTime(seg.start)} -> ${formatTime(seg.end)}]`;
+                    if (state.hasSpeakers && seg.speaker) {
+                        return `${ts} [${formatSpeakerLabel(seg.speaker)}]: ${seg.text || ''}`.trim();
+                    }
+                    return `${ts} ${seg.text || ''}`.trim();
+                }).join('\n');
             }
 
             renderTranscript();
@@ -384,7 +410,7 @@
             document.getElementById('toggle-timestamps').addEventListener('click', (e) => {
                 e.preventDefault();
                 if (!state.segments) {
-                    alert(window.i18n ? window.i18n.t('transcribe.no_timestamps') : 'Timestamps not available. Enable "Show timestamps" before starting transcription.');
+                    alert(window.i18n ? window.i18n.t('transcribe.no_timestamps') : 'Timestamps not available.');
                     return;
                 }
                 state.showTimestamps = !state.showTimestamps;
@@ -397,12 +423,7 @@
 
             document.getElementById('download-plain').addEventListener('click', (e) => {
                 e.preventDefault();
-                downloadFile(buildPlain(), 'transcript.txt');
-            });
-
-            document.getElementById('download-ts').addEventListener('click', (e) => {
-                e.preventDefault();
-                downloadFile(buildWithTimestamps(), 'transcript_with_timestamps.txt');
+                downloadFile(state.showTimestamps ? buildWithTimestamps() : buildPlain(), 'transcript.txt');
             });
         }
 
@@ -419,11 +440,11 @@
             } else {
                 const url = (urlInput.value || '').trim();
                 if (!url) {
-                    alert(window.i18n ? window.i18n.t('transcribe.error_no_url') : 'Please provide a YouTube or Twitch URL.');
+                    alert(window.i18n ? window.i18n.t('transcribe.error_no_url') : 'Please provide a URL.');
                     return;
                 }
             }
-            document.getElementById('spinner').style.display = 'block';
+            document.getElementById('spinner').classList.remove('hidden');
             const resultContainer = document.getElementById('result-container');
             resultContainer.innerHTML = '';
             const formData = new FormData(form);
@@ -433,126 +454,141 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.error) {
-                        document.getElementById('spinner').style.display = 'none';
+                        document.getElementById('spinner').classList.add('hidden');
                         progressContainer.classList.add('hidden');
                         alert(data.error);
                         return;
                     }
                     const jobId = data.job_id;
                     pollStatus(jobId);
+                    loadActivity(); // Refresh activity to show new job
                 })
                 .catch(error => {
-                    document.getElementById('spinner').style.display = 'none';
+                    document.getElementById('spinner').classList.add('hidden');
                     progressContainer.classList.add('hidden');
                     alert('Error: ' + error);
                 });
         });
 
-        // Jobs UI
+        // Activity UI
         const jobsList = document.getElementById('jobs-list');
-        const jobsRefreshBtn = document.getElementById('jobs-refresh');
-        const jobsAuto = document.getElementById('jobs-autorefresh');
-
-        function renderJobs(items) {
-            if (!items || !items.length) {
-                jobsList.innerHTML = `<p class="note">${window.i18n ? window.i18n.t('jobs.no_jobs') : 'No jobs found.'}</p>`;
-                return;
-            }
-            const rows = items.map(j => `
-                <div class="card job-card">
-                    <div class="job-info">
-                        <div class="job-header">
-                            <strong>${j.id}</strong>
-                        </div>
-                        <div class="note">${j.method || ''} • ${j.model || ''} • ${j.source_type || ''}</div>
-                        <div class="note">${window.i18n ? window.i18n.t('jobs.user') : 'User'}: ${j.user_email || 'API'}</div>
-                        <div class="note">${j.started_at ? ((window.i18n ? window.i18n.t('jobs.started') : 'Started') + ': ' + j.started_at) : ''}</div>
-                        <div class="note">${window.i18n ? window.i18n.t('jobs.status') : 'Status'}: ${j.status || ''} • ${typeof j.percent === 'number' ? j.percent : 0}%</div>
-                    </div>
-                    <div class="job-actions">
-                        <button class="button secondary" data-cancel="${j.id}">
-                            <i class="fas fa-ban"></i>
-                            <span>${window.i18n ? window.i18n.t('jobs.cancel') : 'Cancel'}</span>
-                        </button>
-                    </div>
-                    <div class="progress-wrapper" style="margin-top:10px;">
-                        <div class="progress-bar" style="width:${typeof j.percent === 'number' ? j.percent : 0}%;"></div>
-                    </div>
-                </div>`).join('');
-            jobsList.innerHTML = rows;
-            [...jobsList.querySelectorAll('[data-cancel]')].forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const id = btn.getAttribute('data-cancel');
-                    fetch(`/jobs/cancel/${id}`, { method: 'POST' })
-                        .then(r => r.json())
-                        .then(() => loadJobs())
-                        .catch(() => alert('Cancel failed'));
-                });
-            });
-        }
-
-        function loadJobs() {
-            fetch('/jobs/active').then(r => r.json()).then(renderJobs);
-        }
-        jobsRefreshBtn.addEventListener('click', (e) => { e.preventDefault(); loadJobs(); });
-        jobsTimer = setInterval(() => {
-            if (document.getElementById('jobs-tab').classList.contains('active') && jobsAuto.checked) {
-                loadJobs();
-            }
-        }, 2000);
-
-        // History UI
         const historyList = document.getElementById('history-list');
         const historyDetail = document.getElementById('history-detail');
-        const historyRefreshBtn = document.getElementById('history-refresh');
+        const historyModal = document.getElementById('history-detail-modal');
+        const closeModalBtn = document.getElementById('close-history-detail');
+        const activityRefreshBtn = document.getElementById('activity-refresh');
+        const jobsAuto = document.getElementById('jobs-autorefresh');
+
+        // Track current jobs to avoid unnecessary re-renders
+        let currentJobIds = new Set();
+
+        function renderJobs(items) {
+            const section = document.getElementById('active-jobs-section');
+            const hasJobs = items && items.length > 0;
+
+            if (!hasJobs) {
+                section.classList.add('empty');
+                // Only update if not already showing empty state
+                if (!jobsList.querySelector('.empty-state-sm')) {
+                    jobsList.innerHTML = `<div class="empty-state-sm"><i class="fas fa-check-circle"></i> <span>${window.i18n ? window.i18n.t('jobs.no_jobs') : 'No active jobs'}</span></div>`;
+                }
+                currentJobIds.clear();
+                return;
+            }
+
+            section.classList.remove('empty');
+
+            // Check if we need a full re-render or just updates
+            const newJobIds = new Set(items.map(j => j.id));
+            const needsFullRender = currentJobIds.size !== newJobIds.size ||
+                                    ![...currentJobIds].every(id => newJobIds.has(id));
+
+            if (needsFullRender) {
+                // Full re-render when jobs changed
+                const rows = items.map(j => `
+                    <div class="job-item" data-job-id="${j.id}">
+                        <div class="job-item-header">
+                            <span class="status-badge status-${j.status}">${j.status}</span>
+                            <span class="job-percent">${typeof j.percent === 'number' ? j.percent : 0}%</span>
+                        </div>
+                        <div class="job-item-info">
+                            <span class="job-method">${j.method || ''} • ${j.model || ''}</span>
+                        </div>
+                        <div class="progress-wrapper progress-sm">
+                            <div class="progress-bar" style="width:${typeof j.percent === 'number' ? j.percent : 0}%;"></div>
+                        </div>
+                        <button class="button secondary sm job-cancel" data-cancel="${j.id}">
+                            <i class="fas fa-times"></i> Cancel
+                        </button>
+                    </div>`).join('');
+                jobsList.innerHTML = rows;
+
+                // Add cancel handlers
+                [...jobsList.querySelectorAll('[data-cancel]')].forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const id = btn.getAttribute('data-cancel');
+                        fetch(`/jobs/cancel/${id}`, { method: 'POST' })
+                            .then(r => r.json())
+                            .then(() => loadActivity())
+                            .catch(() => alert('Cancel failed'));
+                    });
+                });
+                currentJobIds = newJobIds;
+            } else {
+                // Just update progress for existing jobs (no flicker)
+                items.forEach(j => {
+                    const jobEl = jobsList.querySelector(`[data-job-id="${j.id}"]`);
+                    if (jobEl) {
+                        const percentEl = jobEl.querySelector('.job-percent');
+                        const progressBar = jobEl.querySelector('.progress-bar');
+                        const statusBadge = jobEl.querySelector('.status-badge');
+                        const pct = typeof j.percent === 'number' ? j.percent : 0;
+
+                        if (percentEl) percentEl.textContent = `${pct}%`;
+                        if (progressBar) progressBar.style.width = `${pct}%`;
+                        if (statusBadge) {
+                            statusBadge.className = `status-badge status-${j.status}`;
+                            statusBadge.textContent = j.status;
+                        }
+                    }
+                });
+            }
+        }
+
+        // Track current history to avoid unnecessary re-renders
+        let currentHistoryHash = '';
 
         function renderHistory(items) {
             if (!items || !items.length) {
-                historyList.innerHTML = `<p class="note">${window.i18n ? window.i18n.t('history.no_history') : 'No history yet.'}</p>`;
-                historyDetail.innerHTML = '';
+                if (!historyList.querySelector('.empty-state-sm')) {
+                    historyList.innerHTML = `<div class="empty-state-sm"><i class="fas fa-history"></i> <span>${window.i18n ? window.i18n.t('history.no_history') : 'No history yet'}</span></div>`;
+                }
+                currentHistoryHash = '';
                 return;
             }
-            const table = [`<div class="table-container"><table class="data-table">
-                <thead><tr>
-                    <th>ID</th>
-                    <th>${window.i18n ? window.i18n.t('history.user') : 'User'}</th>
-                    <th>${window.i18n ? window.i18n.t('history.status') : 'Status'}</th>
-                    <th>${window.i18n ? window.i18n.t('history.method') : 'Method'}</th>
-                    <th>${window.i18n ? window.i18n.t('history.model') : 'Model'}</th>
-                    <th>${window.i18n ? window.i18n.t('history.started') : 'Started'}</th>
-                    <th>${window.i18n ? window.i18n.t('history.finished') : 'Finished'}</th>
-                    <th>${window.i18n ? window.i18n.t('history.actions') : 'Actions'}</th>
-                </tr></thead><tbody>`];
-            for (const it of items) {
-                table.push(`<tr>
-                    <td class="monospace">${it.id}</td>
-                    <td>${it.user_email || 'API'}</td>
-                    <td><span class="status-badge status-${it.status}">${it.status}</span></td>
-                    <td>${it.method}</td>
-                    <td>${it.model || ''}</td>
-                    <td>${it.started_at || ''}</td>
-                    <td>${it.finished_at || ''}</td>
-                    <td>
-                        <button class="button secondary sm" data-view="${it.id}"><i class="fas fa-eye"></i></button>
-                        <button class="button secondary sm" data-delete="${it.id}"><i class="fas fa-trash"></i></button>
-                    </td>
-                </tr>`);
+
+            // Create a hash to check if history changed
+            const newHash = items.map(it => `${it.id}-${it.status}`).join(',');
+            if (newHash === currentHistoryHash) {
+                return; // No changes, skip re-render
             }
-            table.push('</tbody></table></div>');
-            historyList.innerHTML = table.join('');
-            [...historyList.querySelectorAll('[data-view]')].forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const id = btn.getAttribute('data-view');
+            currentHistoryHash = newHash;
+
+            const rows = items.map(it => `
+                <div class="history-item" data-view="${it.id}">
+                    <div class="history-item-main">
+                        <span class="status-badge status-${it.status}">${it.status}</span>
+                        <span class="history-method">${it.method} • ${it.model || ''}</span>
+                    </div>
+                    <div class="history-item-meta">
+                        <span class="history-date">${it.finished_at || it.started_at || ''}</span>
+                    </div>
+                </div>`).join('');
+            historyList.innerHTML = rows;
+            [...historyList.querySelectorAll('[data-view]')].forEach(el => {
+                el.addEventListener('click', () => {
+                    const id = el.getAttribute('data-view');
                     fetch(`/history/item/${id}`).then(r => r.json()).then(renderHistoryDetail);
-                });
-            });
-            [...historyList.querySelectorAll('[data-delete]')].forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const id = btn.getAttribute('data-delete');
-                    if (!confirm(window.i18n ? window.i18n.t('history.confirm_delete') : 'Delete this record?')) return;
-                    fetch(`/history/delete/${id}`, { method: 'POST' })
-                        .then(() => loadHistory())
-                        .catch(() => alert('Delete failed'));
                 });
             });
         }
@@ -563,31 +599,56 @@
                 return;
             }
             const hasSeg = Array.isArray(item.segments) && item.segments.length > 0;
+            const hasSpeakers = item.has_speakers || (hasSeg && item.segments.some(s => s.speaker));
             const content = `
-                <div class="card" style="margin-top:15px;">
-                    <h3>Job ${item.id}</h3>
+                <div class="modal-body">
+                    <div class="job-info-summary">
+                        <p><strong>Status:</strong> <span class="status-badge status-${item.status}">${item.status}</span></p>
+                        <p><strong>Method:</strong> ${item.method} • ${item.model || ''}</p>
+                    </div>
                     <div class="controls-row" style="margin:15px 0;">
-                        <button class="button secondary" id="hist-copy">
-                            <i class="fas fa-copy"></i>
-                            <span>${window.i18n ? window.i18n.t('common.copy') : 'Copy'}</span>
+                        <button class="button secondary sm" id="hist-copy">
+                            <i class="fas fa-copy"></i> Copy
                         </button>
-                        <button class="button secondary" id="hist-dl-plain">
-                            <i class="fas fa-download"></i>
-                            <span>${window.i18n ? window.i18n.t('common.download') : 'Download'}</span>
-                        </button>
-                        <button class="button secondary" id="hist-dl-ts">
-                            <i class="fas fa-file-download"></i>
-                            <span>${window.i18n ? window.i18n.t('transcribe.download_ts') : 'Download (timestamps)'}</span>
+                        <button class="button secondary sm" id="hist-dl">
+                            <i class="fas fa-download"></i> Download
                         </button>
                     </div>
                     <div class="transcription-box"><div id="hist-render"></div></div>
                 </div>`;
             historyDetail.innerHTML = content;
+            historyModal.classList.remove('hidden');
+
+            // Speaker colors for history detail
+            const histSpeakerColors = [
+                '#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6',
+                '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'
+            ];
+            const histSpeakerColorMap = {};
+            let histColorIndex = 0;
+
+            function getHistSpeakerColor(speaker) {
+                if (!histSpeakerColorMap[speaker]) {
+                    histSpeakerColorMap[speaker] = histSpeakerColors[histColorIndex % histSpeakerColors.length];
+                    histColorIndex++;
+                }
+                return histSpeakerColorMap[speaker];
+            }
+
+            function formatHistSpeakerLabel(speaker) {
+                if (!speaker) return 'Unknown';
+                return speaker.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            }
 
             const render = () => {
                 const container = document.getElementById('hist-render');
                 if (!hasSeg) {
-                    container.innerText = item.text || '';
+                    // For diarization text, preserve newlines
+                    if (hasSpeakers) {
+                        container.innerHTML = `<pre style="white-space: pre-wrap; font-family: inherit;">${item.text || ''}</pre>`;
+                    } else {
+                        container.innerText = item.text || '';
+                    }
                     return;
                 }
                 const frag = document.createDocumentFragment();
@@ -595,7 +656,18 @@
                     const div = document.createElement('div');
                     div.className = 'segment-line';
                     const ts = `${formatTime(seg.start)} → ${formatTime(seg.end)}`;
-                    div.innerHTML = `<span class="timestamp">[${ts}]</span><span class="seg-text">${seg.text || ''}</span>`;
+
+                    if (hasSpeakers && seg.speaker) {
+                        const color = getHistSpeakerColor(seg.speaker);
+                        const speakerLabel = formatHistSpeakerLabel(seg.speaker);
+                        div.innerHTML = `
+                            <span class="speaker-badge" style="background-color: ${color}; color: white; padding: 2px 8px; border-radius: 4px; margin-right: 8px; font-size: 0.85em;">${speakerLabel}</span>
+                            <span class="timestamp" style="margin-right: 8px;">[${ts}]</span>
+                            <span class="seg-text">${seg.text || ''}</span>
+                        `;
+                    } else {
+                        div.innerHTML = `<span class="timestamp">[${ts}]</span><span class="seg-text">${seg.text || ''}</span>`;
+                    }
                     frag.appendChild(div);
                 });
                 container.innerHTML = '';
@@ -605,21 +677,42 @@
             const buildPlain = () => item.text || '';
             const buildTS = () => {
                 if (!hasSeg) return buildPlain();
-                return (item.segments || []).map(seg =>
-                    `[${formatTime(seg.start)} -> ${formatTime(seg.end)}] ${seg.text || ''}`.trim()
-                ).join('\n');
+                return (item.segments || []).map(seg => {
+                    const ts = `[${formatTime(seg.start)} -> ${formatTime(seg.end)}]`;
+                    if (hasSpeakers && seg.speaker) {
+                        return `${ts} [${formatHistSpeakerLabel(seg.speaker)}]: ${seg.text || ''}`.trim();
+                    }
+                    return `${ts} ${seg.text || ''}`.trim();
+                }).join('\n');
             };
 
             render();
-            document.getElementById('hist-copy').addEventListener('click', () => { copyToClipboard(buildPlain()); });
-            document.getElementById('hist-dl-plain').addEventListener('click', () => { downloadFile(buildPlain(), 'transcript.txt'); });
-            document.getElementById('hist-dl-ts').addEventListener('click', () => { downloadFile(buildTS(), 'transcript_with_timestamps.txt'); });
+            document.getElementById('hist-copy').addEventListener('click', () => { copyToClipboard(hasSeg ? buildTS() : buildPlain()); });
+            document.getElementById('hist-dl').addEventListener('click', () => { downloadFile(hasSeg ? buildTS() : buildPlain(), 'transcript.txt'); });
         }
 
-        function loadHistory() {
+        // Modal close handlers
+        closeModalBtn.addEventListener('click', () => { historyModal.classList.add('hidden'); });
+        historyModal.addEventListener('click', (e) => {
+            if (e.target === historyModal) historyModal.classList.add('hidden');
+        });
+
+        function loadActivity() {
+            fetch('/jobs/active').then(r => r.json()).then(renderJobs);
             fetch('/history/list').then(r => r.json()).then(renderHistory);
         }
-        historyRefreshBtn.addEventListener('click', (e) => { e.preventDefault(); loadHistory(); });
+
+        activityRefreshBtn.addEventListener('click', (e) => { e.preventDefault(); loadActivity(); });
+
+        // Auto-refresh
+        activityTimer = setInterval(() => {
+            if (jobsAuto.checked) {
+                loadActivity();
+            }
+        }, 3000);
+
+        // Initial load
+        loadActivity();
     });
 </script>
 {% endblock %}

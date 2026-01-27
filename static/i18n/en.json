@@ -4,6 +4,7 @@
   },
   "nav": {
     "transcribe": "Transcribe",
+    "activity": "Activity",
     "jobs": "Jobs",
     "history": "History",
     "users": "Users",
@@ -37,6 +38,7 @@
   },
   "jobs": {
     "title": "Active Jobs",
+    "active_jobs": "Active Jobs",
     "note": "Transcriptions continue on the server even if this page is closed. You can cancel running jobs here.",
     "refresh": "Refresh",
     "auto_refresh": "Auto-refresh",
@@ -49,7 +51,7 @@
   "history": {
     "title": "History",
     "refresh": "Refresh",
-    "no_history": "No history yet.",
+    "no_history": "No history yet",
     "view": "View",
     "delete": "Delete",
     "delete_confirm": "Delete this record?",
@@ -61,6 +63,7 @@
     "started": "Started",
     "finished": "Finished",
     "actions": "Actions",
+    "details": "Job Details",
     "job_details": "Job Details",
     "copy": "Copy",
     "download_plain": "Download (plain)",
@@ -114,6 +117,14 @@
       "oidc_client_id": "OIDC Client ID",
       "oidc_client_secret": "OIDC Client Secret",
       "oidc_discovery_url": "OIDC Discovery URL"
+    },
+    "feature_settings": {
+      "title": "Feature Settings",
+      "url_input": "Enable URL Input (YouTube/Twitch)",
+      "url_input_desc": "Allow users to transcribe from YouTube and Twitch URLs",
+      "cloud_api": "Enable Cloud API (OpenAI)",
+      "cloud_api_desc": "Allow users to use OpenAI's cloud transcription API",
+      "no_api_key": "OpenAI API key is not configured. Cloud API will not work."
     },
     "api_settings": {
       "title": "API Settings",
@@ -178,6 +189,9 @@
   "auth": {
     "login": "Login",
     "logout": "Logout",
+    "logged_out": "Successfully Logged Out",
+    "logged_out_message": "You have been successfully logged out.",
+    "back_to_home": "Back to Home",
     "email": "Email",
     "password": "Password",
     "login_button": "Sign In",
@@ -223,7 +237,8 @@
     "no": "No",
     "enabled": "Enabled",
     "disabled": "Disabled",
-    "actions": "Actions"
+    "actions": "Actions",
+    "view": "View"
   },
   "theme": {
     "light": "Light",
