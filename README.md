@@ -1,18 +1,28 @@
 # Whisper Web App
 
-A web application for audio transcription using OpenAI's Whisper model. The application supports both local transcription with the Whisper model and the use of the OpenAI Cloud API.
+A web app for audio transcription using local Whisper and OpenAI Cloud. Features include an Admin Console, multi-method authentication, background jobs, database persistence, and media URL (YouTube/Twitch) ingestion.
 
 ## Features
 
-- Transcription with local Whisper model (tiny, base, small, medium, large)
-- Transcription with OpenAI Cloud API (whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe)
-- OpenAI API-compatible endpoint (`/v1/audio/transcriptions`)
-- Optional API key protection for the local API endpoint
-- Modern UI with copy-to-clipboard functionality
-- Configurable default model for API compatibility mode
-- Automatic chunking for large files when using the OpenAI Cloud API: files > 20 MB are split and uploaded in parts; results are merged
- - Optional timestamps (segments) for local Whisper and whisper-1. Note: gpt-4o-transcribe and gpt-4o-mini-transcribe currently do not return timestamps.
- - Provide a YouTube or Twitch URL instead of a file: the app downloads audio via yt-dlp, then transcribes it (temporary file is deleted).
+- **Local Whisper models**: tiny, base, small, medium, large
+- **OpenAI Cloud API**: whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe
+- **Admin Console**: Comprehensive web-based administration
+  - Settings management (authentication, API configuration)
+  - User management (create, edit, promote/demote)
+  - API key management (create, enable/disable, track usage)
+  - Global job monitoring for administrators
+- **Multi-Method Authentication**:
+  - Local authentication (email/password)
+  - HTTP header authentication (Cloudflare Access, Authelia, etc.)
+  - OpenID Connect (Microsoft Entra ID, Okta, etc.)
+- **Background jobs**: Continue running even if the browser is closed
+- **Jobs view**: Monitor progress and cancel running transcriptions
+- **History**: Browse, view, download, and delete previous transcriptions
+- **Database persistence**: SQLite with Docker volume support
+- **YouTube/Twitch URL ingestion**: via yt-dlp with progress tracking
+- **Internationalization**: English and German (auto-detected from browser)
+- **Theme support**: Light/Dark/Auto modes with user preference persistence
+- **OpenAI-compatible API**: `/v1/audio/transcriptions` endpoint
 
 ## Installation
 
@@ -21,33 +31,29 @@ A web application for audio transcription using OpenAI's Whisper model. The appl
 - Docker (for Docker method)
 - Python 3.9+ (for local installation)
 
-### With Docker
+### With Docker (recommended)
 
 ```bash
-#Download from Github
+# Download from Github
 git clone https://github.com/Janinnho/whisper-api-stt.git
 cd whisper-api-stt
 
 # Build the Docker image
 docker build -t whisper-web-app .
 
-# Start the container without API key
-docker run -p 5000:5000 whisper-web-app
-
-# Start with local API key
-docker run -p 5000:5000 -e LOCAL_API_KEY=your_api_key whisper-web-app
+# Start the container (minimal configuration)
+docker run -p 5001:5001 -v whisper-data:/data whisper-web-app
 
 # Start with OpenAI API key for cloud transcription
-docker run -p 5000:5000 -e OPENAI_API_KEY=your_openai_key whisper-web-app
+docker run -p 5001:5001 -v whisper-data:/data -e OPENAI_API_KEY=your_openai_key whisper-web-app
 ```
 
-Note: The image installs ffmpeg which is required for automatic chunking.
-It also includes yt-dlp to support YouTube/Twitch URL downloads.
+Note: The image includes ffmpeg (required for automatic chunking) and yt-dlp (for YouTube/Twitch URL downloads).
 
 ### With Python Virtual Environment
 
 ```bash
-#Download from Github
+# Download from Github
 git clone https://github.com/Janinnho/whisper-api-stt.git
 cd whisper-api-stt
 
@@ -64,43 +70,61 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # Run the Flask application
-# Without API keys
-flask run
+export DB_PATH=$(pwd)/data/app.db
+mkdir -p $(dirname "$DB_PATH")
+
+# Without OpenAI API key (local models only)
+flask run --port 5001
 # or
 python app.py
 
-# With API keys
-export LOCAL_API_KEY=your_api_key  # For local API protection
-export OPENAI_API_KEY=your_openai_key  # For OpenAI cloud transcription
-flask run
+# With OpenAI API key
+export OPENAI_API_KEY=your_openai_key
+flask run --port 5001
 ```
 
-Note: For cloud transcription with automatic chunking, ffmpeg needs to be installed locally. On macOS:
+Note: For cloud transcription with automatic chunking, ffmpeg needs to be installed locally.
 
+On macOS:
 ```bash
 brew install ffmpeg
-# URL downloads require yt-dlp as well
-pip install yt-dlp
 ```
 
 On Ubuntu/Debian:
-
 ```bash
 sudo apt-get update && sudo apt-get install -y ffmpeg
-# URL downloads require yt-dlp as well
-pip install yt-dlp
 ```
+
+## First-Time Setup
+
+1. Open http://localhost:5001 in your browser
+2. Complete the Setup Wizard to create your admin account
+3. Access the Admin Console to configure:
+   - Authentication methods
+   - API keys
+   - Other settings
 
 ## Usage
 
 ### Web Interface
 
-Open http://localhost:5000 in your browser and use the form to upload and transcribe audio files.
-Alternatively, switch input source to "YouTube/Twitch URL" and paste a media link; the app will download the audio and transcribe it.
+Open http://localhost:5001 in your browser.
 
-The web interface offers two main tabs:
-1. **Transcribe**: Upload and transcribe audio files using either local Whisper models or OpenAI Cloud API.
-2. **API Settings**: Configure which local model should be used when the API receives requests with `model=whisper-1`.
+**Tabs:**
+- **Transcribe**: File upload or YouTube/Twitch URL; choose local or cloud model; optional timestamps
+- **Jobs**: Shows running jobs with live progress; cancel jobs
+- **History**: List completed/error/cancelled transcriptions; view details and download text; delete entries
+- **Settings**: Configure default API model
+- **Admin** (admins only): Full system administration
+
+### Admin Console
+
+Accessible at `/admin` for admin users. Features:
+- **Dashboard**: System statistics overview
+- **Settings**: Authentication configuration, API settings
+- **Users**: Manage local users, promote/demote admins
+- **API Keys**: Create and manage API keys for the transcription endpoint
+- **Jobs**: View and manage all jobs across all users
 
 ### API Usage
 
@@ -108,13 +132,13 @@ The app provides an OpenAI-compatible API endpoint:
 
 ```bash
 # Using local Whisper models directly
-curl -X POST -F "file=@audio.mp3" -F "model=base" http://localhost:5000/v1/audio/transcriptions
+curl -X POST -F "file=@audio.mp3" -F "model=base" http://localhost:5001/v1/audio/transcriptions
 
-# Using OpenAI compatibility mode (will use the model configured in the API Settings)
-curl -X POST -F "file=@audio.mp3" -F "model=whisper-1" http://localhost:5000/v1/audio/transcriptions
+# Using OpenAI compatibility mode (uses configured default model)
+curl -X POST -F "file=@audio.mp3" -F "model=whisper-1" http://localhost:5001/v1/audio/transcriptions
 
-# With API key (if configured)
-curl -X POST -H "Authorization: Bearer your_api_key" -F "file=@audio.mp3" -F "model=base" http://localhost:5000/v1/audio/transcriptions
+# With API key (if required in Admin Console)
+curl -X POST -H "Authorization: Bearer your_api_key" -F "file=@audio.mp3" -F "model=base" http://localhost:5001/v1/audio/transcriptions
 ```
 
 Available local model options:
@@ -124,26 +148,77 @@ Available local model options:
 - `medium`: High accuracy, slower
 - `large`: Highest accuracy, slowest
 
-The API can also accept `whisper-1` as a model parameter for compatibility with applications that support OpenAI's API. In this case, the app will use the model configured in the API Settings tab.
-
 ## Environment Variables
 
-- `OPENAI_API_KEY`: API key for OpenAI Cloud (optional)
-- `LOCAL_API_KEY`: API key to protect the local API endpoint (optional)
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | Optional | API key for OpenAI Cloud transcription |
+| `DB_PATH` | Optional | Path to SQLite database (default: `/data/app.db`) |
 
-### Cloud upload limits and chunking
+**Note**: All other configuration (authentication, API keys, etc.) is managed through the Admin Console and stored in the database.
 
-When using the OpenAI Cloud API, files larger than 20 MB are automatically split into smaller segments before upload. The app re-encodes audio to mono, 16 kHz at 64 kbps to create predictable, small chunks and then merges the partial transcriptions.
+## Authentication Methods
 
-You can override defaults with environment variables:
+### Local Authentication
+- Email and password stored securely with bcrypt hashing
+- Managed through Admin Console
 
-- `MAX_CLOUD_FILE_MB` (default: `20`): Threshold above which files are chunked.
-- `CHUNK_DURATION_SECONDS` (default: `600` = 10 minutes): Duration per chunk after re-encoding.
-- `REENCODE_BITRATE` (default: `64k`): Audio bitrate for chunked files. Lower values yield smaller chunks.
+### HTTP Header Authentication
+- Supports headers like `CF-Access-Authenticated-User-Email`
+- Configurable header name in Admin Console
+- Works with Cloudflare Access, Authelia, and similar solutions
 
-If ffmpeg is not found, the server will return a clear error message indicating it needs to be installed.
+### OpenID Connect (OIDC)
+- Configure via Admin Console with:
+  - Client ID
+  - Client Secret
+  - Discovery URL (e.g., `https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration`)
+- Works with Microsoft Entra ID, Okta, Auth0, etc.
 
-### Timestamps support
+## Data Persistence
 
-- Local Whisper models and the OpenAI whisper-1 model can return per-segment timestamps that the UI can display and export.
-- The GPT-4o transcription models (gpt-4o-transcribe and gpt-4o-mini-transcribe) currently do not provide timestamped segments in responses. The UI will disable the timestamps option when these models are selected.
+By default, the database is created at `/data/app.db`. The Docker image declares `/data` as a volume.
+
+```bash
+# Named volume (recommended)
+docker run -p 5001:5001 -v whisper-data:/data whisper-web-app
+
+# Bind mount
+docker run -p 5001:5001 -v $(pwd)/data:/data whisper-web-app
+```
+
+Records include:
+- Job metadata, status, timing
+- Transcribed text and segments (if timestamps enabled)
+- User accounts and preferences
+- Settings and API keys
+
+## Cloud Upload Limits and Chunking
+
+When using the OpenAI Cloud API, files larger than 20 MB are automatically split into smaller segments. The app re-encodes audio to mono, 16 kHz at 64 kbps and merges partial transcriptions.
+
+Default settings (configurable in Admin Console):
+- `max_cloud_file_mb`: 20
+- `chunk_duration_seconds`: 600 (10 minutes)
+- `reencode_bitrate`: 64k
+
+## Timestamps Support
+
+- Local Whisper models and whisper-1 can return per-segment timestamps
+- GPT-4o transcription models don't provide timestamped segments
+- The UI disables timestamp option for unsupported models
+
+## Migration from v1.2
+
+If upgrading from v1.2:
+
+1. The port has changed from 5000 to 5001
+2. `LOCAL_API_KEY` environment variable is deprecated - use Admin Console API keys instead
+3. `CF_ACCESS_ENFORCE` environment variable is deprecated - configure authentication in Admin Console
+4. Run the Setup Wizard on first access to create an admin account
+
+Your existing database will be automatically migrated to the new schema.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history and changes.

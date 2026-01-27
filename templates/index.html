@@ -1,637 +1,718 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Whisper Transcription</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        :root {
-            --primary-color: #4a6ee0;
-            --primary-light: #e9effd;
-            --secondary-color: #6c757d;
-            --success-color: #28a745;
-            --info-color: #17a2b8;
-            --light-gray: #f8f9fa;
-            --dark-gray: #343a40;
-            --border-radius: 8px;
-            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            --transition: all 0.3s ease;
-        }
-        
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background-color: #f5f7fa;
-            padding: 20px;
-        }
-        
-        .container {
-            max-width: 1000px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        
-        header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        
-        h1 {
-            color: var(--primary-color);
-            font-size: 2.5rem;
-            margin-bottom: 10px;
-        }
-        
-        h2 {
-            color: var(--secondary-color);
-            font-size: 1.5rem;
-            margin: 25px 0 15px 0;
-        }
-        
-        .card {
-            background-color: white;
-            border-radius: var(--border-radius);
-            box-shadow: var(--box-shadow);
-            padding: 25px;
-            margin-bottom: 25px;
-            transition: var(--transition);
-        }
-        
-        .card:hover {
-            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
-        }
-        
-        .tabs {
-            display: flex;
-            margin-bottom: 20px;
-            border-bottom: 1px solid #dee2e6;
-        }
-        
-        .tab {
-            padding: 12px 20px;
-            cursor: pointer;
-            border: none;
-            background: none;
-            font-size: 1rem;
-            font-weight: 500;
-            color: var(--secondary-color);
-            transition: var(--transition);
-        }
-        
-        .tab.active {
-            color: var(--primary-color);
-            border-bottom: 3px solid var(--primary-color);
-        }
-        
-        .tab:hover:not(.active) {
-            color: var(--primary-color);
-            background-color: var(--primary-light);
-        }
-        
-        .tab-content {
-            display: none;
-        }
-        
-        .tab-content.active {
-            display: block;
-        }
-        
-        .form-group {
-            margin-bottom: 20px;
-        }
-        
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 500;
-        }
-        
-        select, input[type="file"] {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ced4da;
-            border-radius: var(--border-radius);
-            font-size: 1rem;
-            transition: var(--transition);
-        }
-        
-        select:focus, input:focus {
-            outline: none;
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 0.2rem rgba(74, 110, 224, 0.25);
-        }
-        
-        .button {
-            display: inline-block;
-            font-weight: 500;
-            color: white;
-            background-color: var(--primary-color);
-            border: none;
-            padding: 12px 20px;
-            font-size: 1rem;
-            border-radius: var(--border-radius);
-            cursor: pointer;
-            transition: var(--transition);
-        }
-        
-        .button:hover {
-            background-color: #3a5abb;
-            transform: translateY(-2px);
-        }
-        
-        .button.secondary {
-            background-color: var(--secondary-color);
-        }
-        
-        .button.secondary:hover {
-            background-color: #5a6268;
-        }
-        
-        .transcription-box {
-            background-color: var(--light-gray);
-            border-radius: var(--border-radius);
-            padding: 20px;
-            min-height: 150px;
-            position: relative;
-            border: 1px solid #dee2e6;
-        }
-    .transcription-header { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
-    .controls-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-    .search-input { padding:10px; border:1px solid #ced4da; border-radius: var(--border-radius); }
-    .timestamp { color:#6c757d; font-family: monospace; margin-right:8px; white-space:nowrap; }
-    .segment-line { margin: 4px 0; }
-        
-        .copy-button {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background-color: white;
-            border: 1px solid #dee2e6;
-            border-radius: 4px;
-            width: 40px;
-            height: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: var(--transition);
-        }
-        
-        .copy-button:hover {
-            background-color: var(--primary-light);
-            color: var(--primary-color);
-        }
-        
-        .alert {
-            padding: 15px;
-            border-radius: var(--border-radius);
-            margin-bottom: 20px;
-            color: white;
-        }
-        
-        .alert-success {
-            background-color: var(--success-color);
-        }
-        
-        .spinner {
-            display: none;
-            text-align: center;
-            padding: 20px;
-        }
-        
-        @media (max-width: 768px) {
-            .container {
-                padding: 10px;
-            }
-            
-            h1 {
-                font-size: 2rem;
-            }
-            
-            .card {
-                padding: 15px;
-            }
-            
-            .tab {
-                padding: 10px 15px;
-                font-size: 0.9rem;
-            }
-        }
+{% extends "base.html" %}
 
-        /* Progress UI */
-        .progress-card {
-            margin-top: 15px;
-        }
-        .progress-wrapper {
-            background: #eee;
-            border-radius: var(--border-radius);
-            overflow: hidden;
-            height: 14px;
-            margin-top: 10px;
-        }
-        .progress-bar {
-            width: 0%;
-            height: 100%;
-            background: var(--primary-color);
-            transition: width 0.3s ease;
-        }
-        .progress-status {
-            margin-top: 8px;
-            color: var(--secondary-color);
-        }
-    .hidden { display: none; }
-    .note { font-size: 0.9rem; color: var(--secondary-color); margin-top: 6px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <header>
-            <h1>Whisper Transcription</h1>
-            <p>Transcribe audio files using OpenAI's Whisper or local models</p>
-        </header>
-        
-        <div class="tabs">
-            <button class="tab active" onclick="openTab(event, 'transcribe-tab')">Transcribe</button>
-            <button class="tab" onclick="openTab(event, 'settings-tab')">API Settings</button>
+{% block title %}Whisper Transcription{% endblock %}
+
+{% block content %}
+<div class="main-layout">
+    <!-- Left Panel: Transcription -->
+    <div class="panel panel-transcribe">
+        <div class="panel-header">
+            <h2 data-i18n="nav.transcribe">Transcribe</h2>
         </div>
-        
-        <!-- Transcribe Tab -->
-        <div id="transcribe-tab" class="tab-content active">
-            <div class="card">
-                <form id="transcription-form" method="POST" enctype="multipart/form-data">
-                    <div class="form-group">
-                        <label>Input Source:</label>
-                        <div class="controls-row">
-                            <label><input type="radio" name="input_source" value="file" id="source-file" checked> File upload</label>
-                            <label><input type="radio" name="input_source" value="url" id="source-url"> YouTube/Twitch URL</label>
-                        </div>
-                        <div class="note">Provide either an audio file or a media URL. URLs from YouTube and Twitch are supported.</div>
+        <div class="panel-body">
+            <form id="transcription-form" method="POST" enctype="multipart/form-data">
+                {% if url_input_enabled %}
+                <div class="form-group">
+                    <label data-i18n="transcribe.input_source">Input Source:</label>
+                    <div class="radio-group">
+                        <label class="radio-label">
+                            <input type="radio" name="input_source" value="file" id="source-file" checked>
+                            <span data-i18n="transcribe.file_upload">File upload</span>
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="input_source" value="url" id="source-url">
+                            <span data-i18n="transcribe.url_input">YouTube/Twitch URL</span>
+                        </label>
                     </div>
-                    <div class="form-group">
-                        <label for="transcription-method">Transcription Method:</label>
-                        <select name="transcription_method" id="transcription-method" onchange="updateModelOptions()">
-                            <option value="local" {% if selected_method == 'local' %}selected{% endif %}>Local Whisper Model</option>
-                            {% if cloud_available %}
-                            <option value="cloud" {% if selected_method == 'cloud' %}selected{% endif %}>OpenAI Cloud API</option>
-                            {% endif %}
-                        </select>
-                    </div>
-                    
-                    <div class="form-group" id="local-model-group" {% if selected_method == 'cloud' %}style="display:none"{% endif %}>
-                        <label for="local-model-size">Local Model Size:</label>
-                        <select name="local_model_size" id="local-model-size">
-                            <option value="tiny" {% if local_model_size == 'tiny' %}selected{% endif %}>tiny</option>
-                            <option value="base" {% if local_model_size == 'base' or not local_model_size %}selected{% endif %}>base</option>
-                            <option value="small" {% if local_model_size == 'small' %}selected{% endif %}>small</option>
-                            <option value="medium" {% if local_model_size == 'medium' %}selected{% endif %}>medium</option>
-                            <option value="large" {% if local_model_size == 'large' %}selected{% endif %}>large</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group" id="cloud-model-group" {% if selected_method != 'cloud' %}style="display:none"{% endif %}>
-                        <label for="cloud-model">Cloud Model:</label>
-                        <select name="cloud_model" id="cloud-model">
-                            <option value="whisper-1" {% if cloud_model == 'whisper-1' or not cloud_model %}selected{% endif %}>whisper-1</option>
-                            <option value="gpt-4o-transcribe" {% if cloud_model == 'gpt-4o-transcribe' %}selected{% endif %}>gpt-4o-transcribe</option>
-                            <option value="gpt-4o-mini-transcribe" {% if cloud_model == 'gpt-4o-mini-transcribe' %}selected{% endif %}>gpt-4o-mini-transcribe</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group" id="file-group">
-                        <label for="audio-file">Upload Audio File:</label>
-                        <input type="file" name="audio_file" id="audio-file" accept="audio/*">
-                    </div>
-                    <div class="form-group hidden" id="url-group">
-                        <label for="media-url">Media URL (YouTube or Twitch):</label>
-                        <input type="url" name="media_url" id="media-url" placeholder="https://www.youtube.com/watch?v=...">
-                    </div>
-                    <div class="form-group">
-                        <label><input type="checkbox" id="with-timestamps" name="with_timestamps"> Show timestamps</label>
-                        <div id="timestamps-note" class="note hidden">Timestamps are not supported by gpt-4o-transcribe or gpt-4o-mini-transcribe. Please use whisper-1 or a local model if you need timestamps.</div>
-                    </div>
-                    
-                    <button type="submit" class="button">
-                        <i class="fas fa-play"></i> Transcribe
-                    </button>
-                </form>
+                </div>
+                {% else %}
+                <input type="hidden" name="input_source" value="file" id="source-file-hidden">
+                {% endif %}
 
-                <div id="spinner" class="spinner">
-                    <i class="fas fa-circle-notch fa-spin fa-3x"></i>
-                    <p>Transcribing... This may take a while depending on the file size and model.</p>
+                <div class="form-group">
+                    <label for="transcription-method" data-i18n="transcribe.method">Transcription Method:</label>
+                    <select name="transcription_method" id="transcription-method" onchange="updateModelOptions()">
+                        <option value="local" {% if selected_method == 'local' %}selected{% endif %} data-i18n="transcribe.local_model">Local Whisper Model</option>
+                        {% if cloud_available %}
+                        <option value="cloud" {% if selected_method == 'cloud' %}selected{% endif %} data-i18n="transcribe.cloud_api">OpenAI Cloud API</option>
+                        {% endif %}
+                    </select>
                 </div>
 
-                <div id="progress-container" class="card progress-card hidden">
-                    <h2>Progress</h2>
-                    <div class="progress-wrapper">
-                        <div id="progress-bar" class="progress-bar"></div>
-                    </div>
-                    <p id="progress-status" class="progress-status">Starting…</p>
+                <div class="form-group" id="local-model-group" {% if selected_method == 'cloud' %}style="display:none"{% endif %}>
+                    <label for="local-model-size" data-i18n="transcribe.model_size">Local Model Size:</label>
+                    <select name="local_model_size" id="local-model-size">
+                        <option value="tiny" {% if local_model_size == 'tiny' %}selected{% endif %}>tiny</option>
+                        <option value="base" {% if local_model_size == 'base' or not local_model_size %}selected{% endif %}>base</option>
+                        <option value="small" {% if local_model_size == 'small' %}selected{% endif %}>small</option>
+                        <option value="medium" {% if local_model_size == 'medium' %}selected{% endif %}>medium</option>
+                        <option value="large" {% if local_model_size == 'large' %}selected{% endif %}>large</option>
+                    </select>
                 </div>
+
+                <div class="form-group" id="cloud-model-group" {% if selected_method != 'cloud' %}style="display:none"{% endif %}>
+                    <label for="cloud-model" data-i18n="transcribe.cloud_model">Cloud Model:</label>
+                    <select name="cloud_model" id="cloud-model">
+                        <option value="whisper-1" {% if cloud_model == 'whisper-1' or not cloud_model %}selected{% endif %}>whisper-1</option>
+                        <option value="gpt-4o-transcribe" {% if cloud_model == 'gpt-4o-transcribe' %}selected{% endif %}>gpt-4o-transcribe</option>
+                        <option value="gpt-4o-mini-transcribe" {% if cloud_model == 'gpt-4o-mini-transcribe' %}selected{% endif %}>gpt-4o-mini-transcribe</option>
+                        <option value="gpt-4o-transcribe-diarize" {% if cloud_model == 'gpt-4o-transcribe-diarize' %}selected{% endif %}>gpt-4o-transcribe-diarize (Speakers)</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="file-group">
+                    <label for="audio-file" data-i18n="transcribe.upload_file">Upload Audio File:</label>
+                    <input type="file" name="audio_file" id="audio-file" accept="audio/*">
+                </div>
+
+                <div class="form-group hidden" id="url-group">
+                    <label for="media-url" data-i18n="transcribe.media_url">Media URL (YouTube or Twitch):</label>
+                    <input type="url" name="media_url" id="media-url" placeholder="https://www.youtube.com/watch?v=...">
+                </div>
+
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="with-timestamps" name="with_timestamps">
+                        <span data-i18n="transcribe.timestamps">Show timestamps</span>
+                    </label>
+                    <div id="timestamps-note" class="note hidden" data-i18n="transcribe.timestamps_note">Timestamps are not supported by gpt-4o-transcribe or gpt-4o-mini-transcribe.</div>
+                </div>
+
+                <button type="submit" class="button button-full">
+                    <i class="fas fa-play"></i>
+                    <span data-i18n="transcribe.button">Transcribe</span>
+                </button>
+            </form>
+
+            <div id="spinner" class="spinner hidden">
+                <i class="fas fa-circle-notch fa-spin fa-3x"></i>
+                <p data-i18n="transcribe.processing">Transcribing...</p>
             </div>
 
-            <noscript>
-            {% if transcription %}
-            <div class="card">
-                <h2>Transcription Result</h2>
-                <div class="transcription-box">
-                    <button class="copy-button" onclick="copyTranscription()" title="Copy to clipboard">
-                        <i class="fas fa-copy"></i>
-                    </button>
-                    <p id="transcription-text">{{ transcription }}</p>
+            <div id="progress-container" class="progress-card hidden">
+                <h4 data-i18n="transcribe.progress">Progress</h4>
+                <div class="progress-wrapper">
+                    <div id="progress-bar" class="progress-bar"></div>
                 </div>
+                <p id="progress-status" class="progress-status" data-i18n="common.loading">Starting…</p>
             </div>
-            {% endif %}
-            </noscript>
+
             <div id="result-container"></div>
         </div>
-        
-        <!-- Settings Tab -->
-        <div id="settings-tab" class="tab-content">
-            <div class="card">
-                <h2>API Settings</h2>
-                <p>Configure which local model to use when receiving API requests with the model="whisper-1" parameter.</p>
-                
-                {% if settings_saved %}
-                <div class="alert alert-success">
-                    <i class="fas fa-check-circle"></i> Settings saved successfully!
-                </div>
-                {% endif %}
-                
-                <form method="POST">
-                    <input type="hidden" name="action" value="save_settings">
-                    <input type="hidden" name="transcription_method" value="{{ selected_method }}">
-                    <input type="hidden" name="local_model_size" value="{{ local_model_size }}">
-                    <input type="hidden" name="cloud_model" value="{{ cloud_model }}">
-                    
-                    <div class="form-group">
-                        <label for="api-model">Default API Model:</label>
-                        <select name="api_model" id="api-model">
-                            <option value="tiny" {% if api_model == 'tiny' %}selected{% endif %}>tiny</option>
-                            <option value="base" {% if api_model == 'base' or not api_model %}selected{% endif %}>base</option>
-                            <option value="small" {% if api_model == 'small' %}selected{% endif %}>small</option>
-                            <option value="medium" {% if api_model == 'medium' %}selected{% endif %}>medium</option>
-                            <option value="large" {% if api_model == 'large' %}selected{% endif %}>large</option>
-                        </select>
-                    </div>
-                    
-                    <button type="submit" class="button">
-                        <i class="fas fa-save"></i> Save Settings
-                    </button>
-                </form>
+    </div>
+
+    <!-- Right Panel: Activity -->
+    <div class="panel panel-activity">
+        <div class="panel-header">
+            <h2 data-i18n="nav.activity">Activity</h2>
+            <div class="panel-controls">
+                <button class="button secondary sm" id="activity-refresh" title="Refresh">
+                    <i class="fas fa-sync"></i>
+                </button>
+                <label class="checkbox-label compact">
+                    <input type="checkbox" id="jobs-autorefresh" checked>
+                    <span>Auto</span>
+                </label>
+            </div>
+        </div>
+        <div class="panel-body">
+            <!-- Active Jobs Section -->
+            <div class="activity-section" id="active-jobs-section">
+                <h3 data-i18n="jobs.active_jobs">Active Jobs</h3>
+                <div id="jobs-list" class="jobs-list"></div>
+            </div>
+
+            <!-- History Section -->
+            <div class="activity-section">
+                <h3 data-i18n="history.title">History</h3>
+                <div id="history-list" class="history-list"></div>
             </div>
         </div>
     </div>
-    
-    <script>
-        function updateModelOptions() {
-            const method = document.getElementById('transcription-method').value;
-            const localGroup = document.getElementById('local-model-group');
-            const cloudGroup = document.getElementById('cloud-model-group');
-            
-            if (method === 'local') {
-                localGroup.style.display = 'block';
-                cloudGroup.style.display = 'none';
-            } else {
-                localGroup.style.display = 'none';
-                cloudGroup.style.display = 'block';
+</div>
+
+<!-- History Detail Modal -->
+<div id="history-detail-modal" class="modal-overlay hidden">
+    <div class="modal modal-lg">
+        <div class="modal-header">
+            <h3 data-i18n="history.details">Job Details</h3>
+            <button class="modal-close" id="close-history-detail">&times;</button>
+        </div>
+        <div id="history-detail"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function updateModelOptions() {
+        const method = document.getElementById('transcription-method').value;
+        const localGroup = document.getElementById('local-model-group');
+        const cloudGroup = document.getElementById('cloud-model-group');
+
+        if (method === 'local') {
+            localGroup.style.display = 'block';
+            cloudGroup.style.display = 'none';
+        } else {
+            localGroup.style.display = 'none';
+            cloudGroup.style.display = 'block';
+        }
+        updateTimestampAvailability();
+    }
+
+    function updateTimestampAvailability() {
+        const method = document.getElementById('transcription-method').value;
+        const tsCheckbox = document.getElementById('with-timestamps');
+        const note = document.getElementById('timestamps-note');
+        let disable = false;
+        if (method === 'cloud') {
+            const cloudModelSel = document.getElementById('cloud-model');
+            const val = cloudModelSel ? cloudModelSel.value : '';
+            if (val && val.startsWith('gpt-4o')) {
+                disable = true;
             }
-            // Also refresh timestamp availability based on current selection
-            updateTimestampAvailability();
+        }
+        tsCheckbox.disabled = disable;
+        if (disable) {
+            tsCheckbox.checked = false;
+            note.classList.remove('hidden');
+        } else {
+            note.classList.add('hidden');
+        }
+    }
+
+    function updateSourceUI() {
+        const sourceFileEl = document.getElementById('source-file');
+        const fileGroup = document.getElementById('file-group');
+        const urlGroup = document.getElementById('url-group');
+        const fileInput = document.getElementById('audio-file');
+        const urlInput = document.getElementById('media-url');
+
+        // If URL input is disabled (elements don't exist), always show file input
+        if (!sourceFileEl || !urlGroup) {
+            if (fileGroup) fileGroup.classList.remove('hidden');
+            return;
         }
 
-        function updateTimestampAvailability() {
-            const method = document.getElementById('transcription-method').value;
-            const tsCheckbox = document.getElementById('with-timestamps');
-            const note = document.getElementById('timestamps-note');
-            let disable = false;
-            if (method === 'cloud') {
-                const cloudModelSel = document.getElementById('cloud-model');
-                const val = cloudModelSel ? cloudModelSel.value : '';
-                if (val && val.startsWith('gpt-4o')) {
-                    disable = true;
-                }
-            }
-            tsCheckbox.disabled = disable;
-            if (disable) {
-                tsCheckbox.checked = false;
-                note.classList.remove('hidden');
-            } else {
-                note.classList.add('hidden');
-            }
-        }
-        
-        function openTab(evt, tabId) {
-            const tabContents = document.getElementsByClassName('tab-content');
-            for (let i = 0; i < tabContents.length; i++) {
-                tabContents[i].classList.remove('active');
-            }
-            
-            const tabs = document.getElementsByClassName('tab');
-            for (let i = 0; i < tabs.length; i++) {
-                tabs[i].classList.remove('active');
-            }
-            
-            document.getElementById(tabId).classList.add('active');
-            evt.currentTarget.classList.add('active');
-        }
-        
-        function copyTranscription() {
-            const text = document.getElementById('transcription-text').innerText;
-            navigator.clipboard.writeText(text).then(function() {
-                const copyButton = document.querySelector('.copy-button');
-                const originalIcon = copyButton.innerHTML;
-                copyButton.innerHTML = '<i class="fas fa-check"></i>';
-                setTimeout(function() {
-                    copyButton.innerHTML = originalIcon;
-                }, 1500);
-            });
-        }
-        
-        function updateSourceUI() {
-            const sourceFile = document.getElementById('source-file').checked;
-            const fileGroup = document.getElementById('file-group');
-            const urlGroup = document.getElementById('url-group');
-            const fileInput = document.getElementById('audio-file');
-            const urlInput = document.getElementById('media-url');
-            if (sourceFile) {
-                fileGroup.style.display = 'block';
-                urlGroup.style.display = 'none';
-                fileInput.required = false; // we'll validate manually
+        const sourceFile = sourceFileEl.checked;
+        if (sourceFile) {
+            fileGroup.classList.remove('hidden');
+            urlGroup.classList.add('hidden');
+            fileInput.required = false;
+            if (urlInput) {
                 urlInput.required = false;
                 urlInput.value = '';
+            }
+        } else {
+            fileGroup.classList.add('hidden');
+            urlGroup.classList.remove('hidden');
+            fileInput.required = false;
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.getElementById('transcription-form');
+        const progressContainer = document.getElementById('progress-container');
+        const progressBar = document.getElementById('progress-bar');
+        const progressStatus = document.getElementById('progress-status');
+        let pollTimer = null;
+        let activityTimer = null;
+
+        // Initialize
+        updateTimestampAvailability();
+        const cloudModelSel = document.getElementById('cloud-model');
+        if (cloudModelSel) {
+            cloudModelSel.addEventListener('change', updateTimestampAvailability);
+        }
+
+        // Source toggle (only if URL input is enabled)
+        const sourceFileEl = document.getElementById('source-file');
+        const sourceUrlEl = document.getElementById('source-url');
+        if (sourceFileEl && sourceUrlEl) {
+            sourceFileEl.addEventListener('change', updateSourceUI);
+            sourceUrlEl.addEventListener('change', updateSourceUI);
+        }
+        updateSourceUI();
+
+        function resetProgress() {
+            progressBar.style.width = '0%';
+            progressStatus.textContent = window.i18n ? window.i18n.t('common.loading') : 'Starting…';
+        }
+
+        function pollStatus(jobId) {
+            pollTimer = setInterval(() => {
+                fetch(`/transcribe_status/${jobId}`)
+                    .then(r => r.json())
+                    .then(job => {
+                        if (job.error && !job.status) {
+                            throw new Error(job.error);
+                        }
+                        const pct = typeof job.percent === 'number' ? job.percent : 0;
+                        progressBar.style.width = `${pct}%`;
+                        progressStatus.textContent = job.status || 'Working…';
+
+                        if (job.result || job.error) {
+                            clearInterval(pollTimer);
+                            document.getElementById('spinner').classList.add('hidden');
+                            if (job.error) {
+                                alert(job.error);
+                                progressContainer.classList.add('hidden');
+                                return;
+                            }
+                            renderResult(job.result);
+                            progressContainer.classList.add('hidden');
+                            loadActivity(); // Refresh activity
+                        }
+                    })
+                    .catch(err => {
+                        clearInterval(pollTimer);
+                        document.getElementById('spinner').classList.add('hidden');
+                        alert('Error: ' + err.message);
+                        progressContainer.classList.add('hidden');
+                    });
+            }, 1000);
+        }
+
+        function renderResult(res) {
+            const resultContainer = document.getElementById('result-container');
+            let transcription = '';
+            let segments = null;
+            let hasSpeakers = false;
+            if (res && typeof res === 'object' && 'text' in res) {
+                transcription = res.text || '';
+                segments = res.segments || null;
+                hasSpeakers = res.has_speakers || false;
             } else {
-                fileGroup.style.display = 'none';
-                urlGroup.style.display = 'block';
-                fileInput.required = false;
+                transcription = (res ?? '').toString();
+            }
+
+            const resultHTML = `
+                <div class="result-card">
+                    <div class="result-header">
+                        <h3 data-i18n="transcribe.result">${window.i18n ? window.i18n.t('transcribe.result') : 'Result'}</h3>
+                        <div class="result-actions">
+                            <button class="button secondary sm" id="toggle-timestamps" title="Toggle timestamps/speakers">
+                                <i class="fas fa-clock"></i>
+                            </button>
+                            <button class="button secondary sm" id="copy-result" title="Copy">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                            <button class="button secondary sm" id="download-plain" title="Download">
+                                <i class="fas fa-download"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <input class="search-input" id="search-input" type="text" placeholder="${window.i18n ? window.i18n.t('transcribe.search_placeholder') : 'Search…'}" />
+                    <div class="transcription-box">
+                        <div id="transcription-render"></div>
+                    </div>
+                </div>`;
+
+            resultContainer.innerHTML = resultHTML;
+
+            const state = { showTimestamps: !!segments, transcription, segments, hasSpeakers };
+
+            // Speaker colors for visual distinction
+            const speakerColors = [
+                '#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6',
+                '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'
+            ];
+            const speakerColorMap = {};
+            let colorIndex = 0;
+
+            function getSpeakerColor(speaker) {
+                if (!speakerColorMap[speaker]) {
+                    speakerColorMap[speaker] = speakerColors[colorIndex % speakerColors.length];
+                    colorIndex++;
+                }
+                return speakerColorMap[speaker];
+            }
+
+            function formatSpeakerLabel(speaker) {
+                // Convert speaker_1 to Speaker 1, etc.
+                if (!speaker) return 'Unknown';
+                return speaker.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            }
+
+            function renderTranscript(filter = "") {
+                const container = document.getElementById('transcription-render');
+                container.innerHTML = '';
+                const term = (filter || "").toLowerCase().trim();
+
+                if (!state.segments || !state.showTimestamps) {
+                    let text = state.transcription || '';
+                    if (term) {
+                        const re = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+                        text = text.replace(re, m => `<mark>${m}</mark>`);
+                    }
+                    // For diarization plain text, preserve newlines
+                    if (state.hasSpeakers) {
+                        container.innerHTML = `<pre style="white-space: pre-wrap; font-family: inherit;">${text}</pre>`;
+                    } else {
+                        container.innerHTML = `<p>${text}</p>`;
+                    }
+                    return;
+                }
+
+                const frag = document.createDocumentFragment();
+                (state.segments || []).forEach(seg => {
+                    let line = seg.text || '';
+                    let show = true;
+                    if (term) {
+                        show = line.toLowerCase().includes(term);
+                        const re = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+                        line = line.replace(re, m => `<mark>${m}</mark>`);
+                    }
+                    if (!show) return;
+
+                    const div = document.createElement('div');
+                    div.className = 'segment-line';
+
+                    if (state.hasSpeakers && seg.speaker) {
+                        // Diarization mode with speakers
+                        const color = getSpeakerColor(seg.speaker);
+                        const speakerLabel = formatSpeakerLabel(seg.speaker);
+                        const ts = `${formatTime(seg.start)} → ${formatTime(seg.end)}`;
+                        div.innerHTML = `
+                            <span class="speaker-badge" style="background-color: ${color}; color: white; padding: 2px 8px; border-radius: 4px; margin-right: 8px; font-size: 0.85em;">${speakerLabel}</span>
+                            <span class="timestamp" style="margin-right: 8px;">[${ts}]</span>
+                            <span class="seg-text">${line}</span>
+                        `;
+                    } else {
+                        // Normal timestamp mode
+                        const ts = `${formatTime(seg.start)} → ${formatTime(seg.end)}`;
+                        div.innerHTML = `<span class="timestamp">[${ts}]</span><span class="seg-text">${line}</span>`;
+                    }
+                    frag.appendChild(div);
+                });
+                container.appendChild(frag);
+            }
+
+            function buildPlain() { return state.transcription || ''; }
+            function buildWithTimestamps() {
+                if (!state.segments) return buildPlain();
+                return (state.segments || []).map(seg => {
+                    const ts = `[${formatTime(seg.start)} -> ${formatTime(seg.end)}]`;
+                    if (state.hasSpeakers && seg.speaker) {
+                        return `${ts} [${formatSpeakerLabel(seg.speaker)}]: ${seg.text || ''}`.trim();
+                    }
+                    return `${ts} ${seg.text || ''}`.trim();
+                }).join('\n');
+            }
+
+            renderTranscript();
+
+            document.getElementById('copy-result').addEventListener('click', () => {
+                const txt = state.showTimestamps && state.segments ? buildWithTimestamps() : buildPlain();
+                copyToClipboard(txt);
+            });
+
+            document.getElementById('toggle-timestamps').addEventListener('click', (e) => {
+                e.preventDefault();
+                if (!state.segments) {
+                    alert(window.i18n ? window.i18n.t('transcribe.no_timestamps') : 'Timestamps not available.');
+                    return;
+                }
+                state.showTimestamps = !state.showTimestamps;
+                renderTranscript(document.getElementById('search-input').value);
+            });
+
+            document.getElementById('search-input').addEventListener('input', (e) => {
+                renderTranscript(e.target.value);
+            });
+
+            document.getElementById('download-plain').addEventListener('click', (e) => {
+                e.preventDefault();
+                downloadFile(state.showTimestamps ? buildWithTimestamps() : buildPlain(), 'transcript.txt');
+            });
+        }
+
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const useFile = document.getElementById('source-file').checked;
+            const fileInput = document.getElementById('audio-file');
+            const urlInput = document.getElementById('media-url');
+            if (useFile) {
+                if (fileInput.files.length === 0) {
+                    alert(window.i18n ? window.i18n.t('transcribe.error_no_file') : 'Please choose an audio file.');
+                    return;
+                }
+            } else {
+                const url = (urlInput.value || '').trim();
+                if (!url) {
+                    alert(window.i18n ? window.i18n.t('transcribe.error_no_url') : 'Please provide a URL.');
+                    return;
+                }
+            }
+            document.getElementById('spinner').classList.remove('hidden');
+            const resultContainer = document.getElementById('result-container');
+            resultContainer.innerHTML = '';
+            const formData = new FormData(form);
+            resetProgress();
+            progressContainer.classList.remove('hidden');
+            fetch('/transcribe_start', { method: 'POST', body: formData })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        document.getElementById('spinner').classList.add('hidden');
+                        progressContainer.classList.add('hidden');
+                        alert(data.error);
+                        return;
+                    }
+                    const jobId = data.job_id;
+                    pollStatus(jobId);
+                    loadActivity(); // Refresh activity to show new job
+                })
+                .catch(error => {
+                    document.getElementById('spinner').classList.add('hidden');
+                    progressContainer.classList.add('hidden');
+                    alert('Error: ' + error);
+                });
+        });
+
+        // Activity UI
+        const jobsList = document.getElementById('jobs-list');
+        const historyList = document.getElementById('history-list');
+        const historyDetail = document.getElementById('history-detail');
+        const historyModal = document.getElementById('history-detail-modal');
+        const closeModalBtn = document.getElementById('close-history-detail');
+        const activityRefreshBtn = document.getElementById('activity-refresh');
+        const jobsAuto = document.getElementById('jobs-autorefresh');
+
+        // Track current jobs to avoid unnecessary re-renders
+        let currentJobIds = new Set();
+
+        function renderJobs(items) {
+            const section = document.getElementById('active-jobs-section');
+            const hasJobs = items && items.length > 0;
+
+            if (!hasJobs) {
+                section.classList.add('empty');
+                // Only update if not already showing empty state
+                if (!jobsList.querySelector('.empty-state-sm')) {
+                    jobsList.innerHTML = `<div class="empty-state-sm"><i class="fas fa-check-circle"></i> <span>${window.i18n ? window.i18n.t('jobs.no_jobs') : 'No active jobs'}</span></div>`;
+                }
+                currentJobIds.clear();
+                return;
+            }
+
+            section.classList.remove('empty');
+
+            // Check if we need a full re-render or just updates
+            const newJobIds = new Set(items.map(j => j.id));
+            const needsFullRender = currentJobIds.size !== newJobIds.size ||
+                                    ![...currentJobIds].every(id => newJobIds.has(id));
+
+            if (needsFullRender) {
+                // Full re-render when jobs changed
+                const rows = items.map(j => `
+                    <div class="job-item" data-job-id="${j.id}">
+                        <div class="job-item-header">
+                            <span class="status-badge status-${j.status}">${j.status}</span>
+                            <span class="job-percent">${typeof j.percent === 'number' ? j.percent : 0}%</span>
+                        </div>
+                        <div class="job-item-info">
+                            <span class="job-method">${j.method || ''} • ${j.model || ''}</span>
+                        </div>
+                        <div class="progress-wrapper progress-sm">
+                            <div class="progress-bar" style="width:${typeof j.percent === 'number' ? j.percent : 0}%;"></div>
+                        </div>
+                        <button class="button secondary sm job-cancel" data-cancel="${j.id}">
+                            <i class="fas fa-times"></i> Cancel
+                        </button>
+                    </div>`).join('');
+                jobsList.innerHTML = rows;
+
+                // Add cancel handlers
+                [...jobsList.querySelectorAll('[data-cancel]')].forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const id = btn.getAttribute('data-cancel');
+                        fetch(`/jobs/cancel/${id}`, { method: 'POST' })
+                            .then(r => r.json())
+                            .then(() => loadActivity())
+                            .catch(() => alert('Cancel failed'));
+                    });
+                });
+                currentJobIds = newJobIds;
+            } else {
+                // Just update progress for existing jobs (no flicker)
+                items.forEach(j => {
+                    const jobEl = jobsList.querySelector(`[data-job-id="${j.id}"]`);
+                    if (jobEl) {
+                        const percentEl = jobEl.querySelector('.job-percent');
+                        const progressBar = jobEl.querySelector('.progress-bar');
+                        const statusBadge = jobEl.querySelector('.status-badge');
+                        const pct = typeof j.percent === 'number' ? j.percent : 0;
+
+                        if (percentEl) percentEl.textContent = `${pct}%`;
+                        if (progressBar) progressBar.style.width = `${pct}%`;
+                        if (statusBadge) {
+                            statusBadge.className = `status-badge status-${j.status}`;
+                            statusBadge.textContent = j.status;
+                        }
+                    }
+                });
             }
         }
-        // AJAX form submission to prevent full page reload
-        document.addEventListener('DOMContentLoaded', function() {
-            const form = document.getElementById('transcription-form');
-            const progressContainer = document.getElementById('progress-container');
-            const progressBar = document.getElementById('progress-bar');
-            const progressStatus = document.getElementById('progress-status');
-            let pollTimer = null;
 
-            // Initialize timestamp availability and react to model changes
-            updateTimestampAvailability();
-            const cloudModelSel = document.getElementById('cloud-model');
-            if (cloudModelSel) {
-                cloudModelSel.addEventListener('change', updateTimestampAvailability);
-            }
+        // Track current history to avoid unnecessary re-renders
+        let currentHistoryHash = '';
 
-            // Source toggle
-            document.getElementById('source-file').addEventListener('change', updateSourceUI);
-            document.getElementById('source-url').addEventListener('change', updateSourceUI);
-            updateSourceUI();
-
-            function resetProgress() {
-                progressBar.style.width = '0%';
-                progressStatus.textContent = 'Starting…';
-            }
-
-            function pollStatus(jobId) {
-                pollTimer = setInterval(() => {
-                    fetch(`/transcribe_status/${jobId}`)
-                        .then(r => r.json())
-                        .then(job => {
-                            if (job.error && !job.status) {
-                                throw new Error(job.error);
-                            }
-                            const pct = typeof job.percent === 'number' ? job.percent : 0;
-                            progressBar.style.width = `${pct}%`;
-                            progressStatus.textContent = job.status || 'Working…';
-
-                            if (job.result || job.error) {
-                                clearInterval(pollTimer);
-                                document.getElementById('spinner').style.display = 'none';
-                                if (job.error) {
-                                    alert(job.error);
-                                    progressContainer.style.display = 'none';
-                                    return;
-                                }
-                                                                const resultContainer = document.getElementById('result-container');
-                                                                const res = job.result;
-                                                                let transcription = '';
-                                                                let segments = null;
-                                                                if (res && typeof res === 'object' && 'text' in res) {
-                                                                        transcription = res.text || '';
-                                                                        segments = res.segments || null;
-                                                                } else {
-                                                                        transcription = (res ?? '').toString();
-                                                                }
-                                                                const resultHTML = `
-                        <div class="card">
-                            <h2>Transcription Result</h2>
-                            <div class="transcription-header">
-                                <div class="controls-row">
-                                    <button class="button secondary" id="toggle-timestamps"><i class="fas fa-clock"></i> Toggle timestamps</button>
-                                    <input class="search-input" id="search-input" type="text" placeholder="Search transcript…" />
-                                    <button class="button secondary" id="download-plain"><i class="fas fa-download"></i> Download (plain)</button>
-                                    <button class="button secondary" id="download-ts"><i class="fas fa-file-download"></i> Download (timestamps)</button>
-                                </div>
-                                <button class="copy-button" title="Copy to clipboard"><i class="fas fa-copy"></i></button>
-                            </div>
-                            <div class="transcription-box">
-                                <div id="transcription-render"></div>
-                            </div>
-                        </div>`;
-                                                                resultContainer.innerHTML = resultHTML;
-                                                                const state = { showTimestamps: !!segments, transcription, segments };
-                                                                function secondsToHHMMSS(s){ s = Math.max(0, Math.floor(s||0)); const h=String(Math.floor(s/3600)).padStart(2,'0'); const m=String(Math.floor((s%3600)/60)).padStart(2,'0'); const ss=String(s%60).padStart(2,'0'); return `${h}:${m}:${ss}`; }
-                                                                function renderTranscript(filter=""){
-                                                                    const container = document.getElementById('transcription-render');
-                                                                    container.innerHTML = '';
-                                                                    const term=(filter||"").toLowerCase().trim();
-                                                                    if(!state.segments || !state.showTimestamps){
-                                                                        let text = state.transcription || '';
-                                                                        if(term){ const re = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'); text = text.replace(re, m=>`<mark>${m}</mark>`);} 
-                                                                        container.innerHTML = `<p>${text}</p>`; return; }
-                                                                    const frag = document.createDocumentFragment();
-                                                                    (state.segments||[]).forEach(seg=>{
-                                                                        let line = seg.text || '';
-                                                                        let show = true;
-                                                                        if(term){ show = line.toLowerCase().includes(term); const re=new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'); line = line.replace(re, m=>`<mark>${m}</mark>`);} 
-                                                                        if(!show) return;
-                                                                        const div=document.createElement('div'); div.className='segment-line';
-                                                                        const ts = `${secondsToHHMMSS(seg.start)} → ${secondsToHHMMSS(seg.end)}`;
-                                                                        div.innerHTML = `<span class="timestamp">[${ts}]</span><span class="seg-text">${line}</span>`;
-                                                                        frag.appendChild(div);
-                                                                    });
-                                                                    container.appendChild(frag);
-                                                                }
-                                                                function buildPlain(){ return state.transcription || ''; }
-                                                                function buildWithTimestamps(){ if(!state.segments) return buildPlain(); return (state.segments||[]).map(seg=>`[${secondsToHHMMSS(seg.start)} -> ${secondsToHHMMSS(seg.end)}] ${seg.text||''}`.trim()).join('\n'); }
-                                                                function download(content, filename, mime='text/plain'){ const blob=new Blob([content], {type:mime}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=filename; a.click(); setTimeout(()=>URL.revokeObjectURL(url), 500); }
-                                                                renderTranscript();
-                                                                const copyButton = resultContainer.querySelector('.copy-button');
-                                                                copyButton.addEventListener('click', ()=>{ const txt = state.showTimestamps && state.segments ? buildWithTimestamps() : buildPlain(); navigator.clipboard.writeText(txt);});
-                                                                document.getElementById('toggle-timestamps').addEventListener('click', (e)=>{ e.preventDefault(); if(!state.segments){ alert('Timestamps not available. Enable "Show timestamps" before starting transcription.'); return;} state.showTimestamps = !state.showTimestamps; renderTranscript(document.getElementById('search-input').value); });
-                                                                document.getElementById('search-input').addEventListener('input', (e)=>{ renderTranscript(e.target.value); });
-                                                                document.getElementById('download-plain').addEventListener('click', (e)=>{ e.preventDefault(); download(buildPlain(), 'transcript.txt'); });
-                                                                document.getElementById('download-ts').addEventListener('click', (e)=>{ e.preventDefault(); download(buildWithTimestamps(), 'transcript_with_timestamps.txt'); });
-                                progressContainer.style.display = 'none';
-                            }
-                        })
-                        .catch(err => {
-                            clearInterval(pollTimer);
-                            document.getElementById('spinner').style.display = 'none';
-                            alert('Error: ' + err.message);
-                            progressContainer.style.display = 'none';
-                        });
-                }, 1000);
-            }
-
-            form.addEventListener('submit', function(e) {
-                e.preventDefault();
-                const useFile = document.getElementById('source-file').checked;
-                const fileInput = document.getElementById('audio-file');
-                const urlInput = document.getElementById('media-url');
-                if (useFile) {
-                    if (fileInput.files.length === 0) {
-                        alert('Please choose an audio file.');
-                        return;
-                    }
-                } else {
-                    const url = (urlInput.value || '').trim();
-                    if (!url) {
-                        alert('Please provide a YouTube or Twitch URL.');
-                        return;
-                    }
+        function renderHistory(items) {
+            if (!items || !items.length) {
+                if (!historyList.querySelector('.empty-state-sm')) {
+                    historyList.innerHTML = `<div class="empty-state-sm"><i class="fas fa-history"></i> <span>${window.i18n ? window.i18n.t('history.no_history') : 'No history yet'}</span></div>`;
                 }
-                document.getElementById('spinner').style.display = 'block';
-                const resultContainer = document.getElementById('result-container');
-                resultContainer.innerHTML = '';
-                const formData = new FormData(form);
-                resetProgress();
-                progressContainer.classList.remove('hidden');
-                fetch('/transcribe_start', { method: 'POST', body: formData })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.error) {
-                            document.getElementById('spinner').style.display = 'none';
-                            progressContainer.classList.add('hidden');
-                            alert(data.error);
-                            return;
-                        }
-                        const jobId = data.job_id;
-                        pollStatus(jobId);
-                    })
-                    .catch(error => {
-                        document.getElementById('spinner').style.display = 'none';
-                        progressContainer.classList.add('hidden');
-                        alert('Error: ' + error);
-                    });
+                currentHistoryHash = '';
+                return;
+            }
+
+            // Create a hash to check if history changed
+            const newHash = items.map(it => `${it.id}-${it.status}`).join(',');
+            if (newHash === currentHistoryHash) {
+                return; // No changes, skip re-render
+            }
+            currentHistoryHash = newHash;
+
+            const rows = items.map(it => `
+                <div class="history-item" data-view="${it.id}">
+                    <div class="history-item-main">
+                        <span class="status-badge status-${it.status}">${it.status}</span>
+                        <span class="history-method">${it.method} • ${it.model || ''}</span>
+                    </div>
+                    <div class="history-item-meta">
+                        <span class="history-date">${it.finished_at || it.started_at || ''}</span>
+                    </div>
+                </div>`).join('');
+            historyList.innerHTML = rows;
+            [...historyList.querySelectorAll('[data-view]')].forEach(el => {
+                el.addEventListener('click', () => {
+                    const id = el.getAttribute('data-view');
+                    fetch(`/history/item/${id}`).then(r => r.json()).then(renderHistoryDetail);
+                });
             });
+        }
+
+        function renderHistoryDetail(item) {
+            if (!item || item.error) {
+                historyDetail.innerHTML = `<p class="note">${window.i18n ? window.i18n.t('history.no_details') : 'No details.'}</p>`;
+                return;
+            }
+            const hasSeg = Array.isArray(item.segments) && item.segments.length > 0;
+            const hasSpeakers = item.has_speakers || (hasSeg && item.segments.some(s => s.speaker));
+            const content = `
+                <div class="modal-body">
+                    <div class="job-info-summary">
+                        <p><strong>Status:</strong> <span class="status-badge status-${item.status}">${item.status}</span></p>
+                        <p><strong>Method:</strong> ${item.method} • ${item.model || ''}</p>
+                    </div>
+                    <div class="controls-row" style="margin:15px 0;">
+                        <button class="button secondary sm" id="hist-copy">
+                            <i class="fas fa-copy"></i> Copy
+                        </button>
+                        <button class="button secondary sm" id="hist-dl">
+                            <i class="fas fa-download"></i> Download
+                        </button>
+                    </div>
+                    <div class="transcription-box"><div id="hist-render"></div></div>
+                </div>`;
+            historyDetail.innerHTML = content;
+            historyModal.classList.remove('hidden');
+
+            // Speaker colors for history detail
+            const histSpeakerColors = [
+                '#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6',
+                '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'
+            ];
+            const histSpeakerColorMap = {};
+            let histColorIndex = 0;
+
+            function getHistSpeakerColor(speaker) {
+                if (!histSpeakerColorMap[speaker]) {
+                    histSpeakerColorMap[speaker] = histSpeakerColors[histColorIndex % histSpeakerColors.length];
+                    histColorIndex++;
+                }
+                return histSpeakerColorMap[speaker];
+            }
+
+            function formatHistSpeakerLabel(speaker) {
+                if (!speaker) return 'Unknown';
+                return speaker.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            }
+
+            const render = () => {
+                const container = document.getElementById('hist-render');
+                if (!hasSeg) {
+                    // For diarization text, preserve newlines
+                    if (hasSpeakers) {
+                        container.innerHTML = `<pre style="white-space: pre-wrap; font-family: inherit;">${item.text || ''}</pre>`;
+                    } else {
+                        container.innerText = item.text || '';
+                    }
+                    return;
+                }
+                const frag = document.createDocumentFragment();
+                (item.segments || []).forEach(seg => {
+                    const div = document.createElement('div');
+                    div.className = 'segment-line';
+                    const ts = `${formatTime(seg.start)} → ${formatTime(seg.end)}`;
+
+                    if (hasSpeakers && seg.speaker) {
+                        const color = getHistSpeakerColor(seg.speaker);
+                        const speakerLabel = formatHistSpeakerLabel(seg.speaker);
+                        div.innerHTML = `
+                            <span class="speaker-badge" style="background-color: ${color}; color: white; padding: 2px 8px; border-radius: 4px; margin-right: 8px; font-size: 0.85em;">${speakerLabel}</span>
+                            <span class="timestamp" style="margin-right: 8px;">[${ts}]</span>
+                            <span class="seg-text">${seg.text || ''}</span>
+                        `;
+                    } else {
+                        div.innerHTML = `<span class="timestamp">[${ts}]</span><span class="seg-text">${seg.text || ''}</span>`;
+                    }
+                    frag.appendChild(div);
+                });
+                container.innerHTML = '';
+                container.appendChild(frag);
+            };
+
+            const buildPlain = () => item.text || '';
+            const buildTS = () => {
+                if (!hasSeg) return buildPlain();
+                return (item.segments || []).map(seg => {
+                    const ts = `[${formatTime(seg.start)} -> ${formatTime(seg.end)}]`;
+                    if (hasSpeakers && seg.speaker) {
+                        return `${ts} [${formatHistSpeakerLabel(seg.speaker)}]: ${seg.text || ''}`.trim();
+                    }
+                    return `${ts} ${seg.text || ''}`.trim();
+                }).join('\n');
+            };
+
+            render();
+            document.getElementById('hist-copy').addEventListener('click', () => { copyToClipboard(hasSeg ? buildTS() : buildPlain()); });
+            document.getElementById('hist-dl').addEventListener('click', () => { downloadFile(hasSeg ? buildTS() : buildPlain(), 'transcript.txt'); });
+        }
+
+        // Modal close handlers
+        closeModalBtn.addEventListener('click', () => { historyModal.classList.add('hidden'); });
+        historyModal.addEventListener('click', (e) => {
+            if (e.target === historyModal) historyModal.classList.add('hidden');
         });
-    </script>
-</body>
-</html>
+
+        function loadActivity() {
+            fetch('/jobs/active').then(r => r.json()).then(renderJobs);
+            fetch('/history/list').then(r => r.json()).then(renderHistory);
+        }
+
+        activityRefreshBtn.addEventListener('click', (e) => { e.preventDefault(); loadActivity(); });
+
+        // Auto-refresh
+        activityTimer = setInterval(() => {
+            if (jobsAuto.checked) {
+                loadActivity();
+            }
+        }, 3000);
+
+        // Initial load
+        loadActivity();
+    });
+</script>
+{% endblock %}

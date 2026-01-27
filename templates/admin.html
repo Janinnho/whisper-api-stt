@@ -1,0 +1,1239 @@
+{% extends "base.html" %}
+
+{% block title %}Admin - Whisper Transcription{% endblock %}
+
+{% block content %}
+<div class="tabs">
+    <button class="tab active" onclick="openAdminTab(event, 'admin-dashboard')">
+        <i class="fas fa-tachometer-alt"></i> <span data-i18n="admin.dashboard">Dashboard</span>
+    </button>
+    <button class="tab" onclick="openAdminTab(event, 'admin-settings')">
+        <i class="fas fa-cog"></i> <span data-i18n="admin.settings">Settings</span>
+    </button>
+    <button class="tab" onclick="openAdminTab(event, 'admin-users')">
+        <i class="fas fa-users"></i> <span data-i18n="admin.users">Users</span>
+    </button>
+    <button class="tab" onclick="openAdminTab(event, 'admin-api-keys')">
+        <i class="fas fa-key"></i> <span data-i18n="admin.api_keys">API Keys</span>
+    </button>
+    <button class="tab" onclick="openAdminTab(event, 'admin-jobs')">
+        <i class="fas fa-tasks"></i> <span data-i18n="admin.all_jobs">All Jobs</span>
+    </button>
+    <button class="tab" onclick="openAdminTab(event, 'admin-help')">
+        <i class="fas fa-question-circle"></i> <span>Help</span>
+    </button>
+    <a href="/" class="tab" style="margin-left: auto;">
+        <i class="fas fa-arrow-left"></i> <span>Back to App</span>
+    </a>
+</div>
+
+<!-- Dashboard Tab -->
+<div id="admin-dashboard" class="tab-content active">
+    <!-- System Status -->
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title"><i class="fas fa-server"></i> System Status</h3>
+        </div>
+        <div id="system-status" class="status-grid">
+            <div class="status-item">
+                <span class="status-label">OpenAI API Key</span>
+                <span id="openai-status" class="status-value">
+                    <i class="fas fa-circle-notch fa-spin"></i>
+                </span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Cloud API</span>
+                <span id="cloud-api-status" class="status-value">
+                    <i class="fas fa-circle-notch fa-spin"></i>
+                </span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">URL Input (YouTube/Twitch)</span>
+                <span id="url-input-status" class="status-value">
+                    <i class="fas fa-circle-notch fa-spin"></i>
+                </span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Authentication</span>
+                <span id="auth-status" class="status-value">
+                    <i class="fas fa-circle-notch fa-spin"></i>
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistics -->
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title" data-i18n="admin.stats.title">Statistics</h3>
+            <button class="button secondary sm" onclick="loadStats()">
+                <i class="fas fa-sync"></i>
+            </button>
+        </div>
+        <div id="stats-content">
+            <div class="spinner">
+                <i class="fas fa-circle-notch fa-spin"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Settings Tab -->
+<div id="admin-settings" class="tab-content">
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title" data-i18n="admin.auth_settings.title">Authentication Settings</h3>
+        </div>
+        <form id="auth-settings-form" class="settings-form">
+            <div class="form-group">
+                <label data-i18n="admin.auth_settings.enable_auth">Enable Authentication</label>
+                <input type="checkbox" id="auth_enabled" name="auth_enabled">
+            </div>
+            <div class="form-group">
+                <label for="auth_default_method" data-i18n="admin.auth_settings.default_method">Default Authentication Method</label>
+                <select id="auth_default_method" name="auth_default_method">
+                    <option value="local">Local (Email & Password)</option>
+                    <option value="http-header">HTTP Header</option>
+                    <option value="oidc">OpenID Connect</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label data-i18n="admin.auth_settings.http_header_enabled">Enable HTTP Header Authentication</label>
+                <input type="checkbox" id="auth_http_header_enabled" name="auth_http_header_enabled">
+            </div>
+            <div class="form-group">
+                <label for="auth_http_header_name" data-i18n="admin.auth_settings.http_header_name">HTTP Header Name</label>
+                <input type="text" id="auth_http_header_name" name="auth_http_header_name" placeholder="CF-Access-Authenticated-User-Email">
+            </div>
+            <div class="form-group">
+                <label data-i18n="admin.auth_settings.oidc_enabled">Enable OIDC Authentication</label>
+                <input type="checkbox" id="auth_oidc_enabled" name="auth_oidc_enabled">
+                <small class="note">See the <a href="#" onclick="openAdminTab(event, 'admin-help'); return false;">Help tab</a> for setup instructions</small>
+            </div>
+            <div class="form-group">
+                <label for="auth_oidc_client_id" data-i18n="admin.auth_settings.oidc_client_id">OIDC Client ID</label>
+                <input type="text" id="auth_oidc_client_id" name="auth_oidc_client_id">
+            </div>
+            <div class="form-group">
+                <label for="auth_oidc_client_secret" data-i18n="admin.auth_settings.oidc_client_secret">OIDC Client Secret (optional)</label>
+                <input type="password" id="auth_oidc_client_secret" name="auth_oidc_client_secret" placeholder="Leave empty for public client (PKCE)">
+            </div>
+            <div class="form-group">
+                <label for="auth_oidc_discovery_url" data-i18n="admin.auth_settings.oidc_discovery_url">OIDC Discovery URL</label>
+                <input type="url" id="auth_oidc_discovery_url" name="auth_oidc_discovery_url" placeholder="https://login.microsoftonline.com/{tenant-id}/v2.0/.well-known/openid-configuration">
+            </div>
+            <div class="form-group">
+                <label for="auth_oidc_redirect_uri" data-i18n="admin.auth_settings.oidc_redirect_uri">OIDC Redirect URI</label>
+                <input type="url" id="auth_oidc_redirect_uri" name="auth_oidc_redirect_uri" placeholder="https://your-domain.com/auth/oidc/callback">
+                <small class="note">This URL must be registered in your identity provider</small>
+            </div>
+        </form>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title"><i class="fas fa-toggle-on"></i> <span data-i18n="admin.feature_settings.title">Feature Settings</span></h3>
+        </div>
+        <form id="feature-settings-form" class="settings-form">
+            <div class="form-group">
+                <label data-i18n="admin.feature_settings.url_input">Enable URL Input (YouTube/Twitch)</label>
+                <input type="checkbox" id="feature_url_input_enabled" name="feature_url_input_enabled">
+                <small class="note" data-i18n="admin.feature_settings.url_input_desc">Allow users to transcribe from YouTube and Twitch URLs</small>
+            </div>
+            <div class="form-group">
+                <label data-i18n="admin.feature_settings.cloud_api">Enable Cloud API (OpenAI)</label>
+                <input type="checkbox" id="feature_cloud_api_enabled" name="feature_cloud_api_enabled">
+                <small class="note" data-i18n="admin.feature_settings.cloud_api_desc">Allow users to use OpenAI's cloud transcription API</small>
+            </div>
+            <div id="cloud-api-warning" class="alert alert-warning hidden">
+                <i class="fas fa-exclamation-triangle"></i>
+                <span data-i18n="admin.feature_settings.no_api_key">OpenAI API key is not configured. Cloud API will not work.</span>
+            </div>
+        </form>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title" data-i18n="admin.api_settings.title">API Settings</h3>
+        </div>
+        <form id="api-settings-form" class="settings-form">
+            <div class="form-group">
+                <label data-i18n="admin.api_settings.require_key">Require API Key for API Access</label>
+                <input type="checkbox" id="api_key_required" name="api_key_required">
+            </div>
+            <div class="form-group">
+                <label for="api_default_model" data-i18n="admin.api_settings.default_model">Default API Model</label>
+                <select id="api_default_model" name="api_default_model">
+                    <option value="tiny">tiny</option>
+                    <option value="base">base</option>
+                    <option value="small">small</option>
+                    <option value="medium">medium</option>
+                    <option value="large">large</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="max_cloud_file_mb" data-i18n="admin.api_settings.max_file_size">Max Cloud File Size (MB)</label>
+                <input type="number" id="max_cloud_file_mb" name="max_cloud_file_mb" min="1" max="100">
+            </div>
+            <div class="form-group">
+                <label for="chunk_duration_seconds" data-i18n="admin.api_settings.chunk_duration">Chunk Duration (seconds)</label>
+                <input type="number" id="chunk_duration_seconds" name="chunk_duration_seconds" min="60" max="3600">
+            </div>
+            <div class="form-group">
+                <label for="reencode_bitrate" data-i18n="admin.api_settings.reencode_bitrate">Re-encode Bitrate</label>
+                <input type="text" id="reencode_bitrate" name="reencode_bitrate" placeholder="64k">
+            </div>
+            <div class="form-group">
+                <label for="job_timeout_seconds" data-i18n="admin.api_settings.job_timeout">Job Timeout (seconds)</label>
+                <input type="number" id="job_timeout_seconds" name="job_timeout_seconds" min="60">
+            </div>
+        </form>
+    </div>
+
+    <button class="button" onclick="saveSettings()">
+        <i class="fas fa-save"></i> <span data-i18n="common.save">Save</span>
+    </button>
+</div>
+
+<!-- Users Tab -->
+<div id="admin-users" class="tab-content">
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title" data-i18n="admin.users.title">User Management</h3>
+            <div class="controls-row">
+                <button class="button secondary sm" onclick="loadUsers()">
+                    <i class="fas fa-sync"></i> <span data-i18n="common.refresh">Refresh</span>
+                </button>
+                <button class="button sm" onclick="showCreateUserModal()">
+                    <i class="fas fa-plus"></i> <span data-i18n="admin.users.create">Create User</span>
+                </button>
+            </div>
+        </div>
+        <div id="users-list" class="table-wrapper">
+            <div class="spinner">
+                <i class="fas fa-circle-notch fa-spin"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- API Keys Tab -->
+<div id="admin-api-keys" class="tab-content">
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title" data-i18n="admin.api_keys.title">API Keys</h3>
+            <div class="controls-row">
+                <button class="button secondary sm" onclick="loadApiKeys()">
+                    <i class="fas fa-sync"></i> <span data-i18n="common.refresh">Refresh</span>
+                </button>
+                <button class="button sm" onclick="showCreateApiKeyModal()">
+                    <i class="fas fa-plus"></i> <span data-i18n="admin.api_keys.create">Create API Key</span>
+                </button>
+            </div>
+        </div>
+        <div id="api-keys-list" class="table-wrapper">
+            <div class="spinner">
+                <i class="fas fa-circle-notch fa-spin"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Jobs Tab -->
+<div id="admin-jobs" class="tab-content">
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title" data-i18n="admin.jobs.title">All Jobs</h3>
+            <div class="controls-row">
+                <select id="jobs-filter" onchange="loadAllJobs()">
+                    <option value="">All</option>
+                    <option value="running">Running</option>
+                    <option value="completed">Completed</option>
+                    <option value="error">Error</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+                <button class="button secondary sm" onclick="loadAllJobs()">
+                    <i class="fas fa-sync"></i> <span data-i18n="common.refresh">Refresh</span>
+                </button>
+            </div>
+        </div>
+        <div id="all-jobs-list" class="table-wrapper">
+            <div class="spinner">
+                <i class="fas fa-circle-notch fa-spin"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Help Tab -->
+<div id="admin-help" class="tab-content">
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title"><i class="fas fa-question-circle"></i> Setup Guides</h3>
+        </div>
+        <div class="help-nav">
+            <button class="help-nav-btn active" onclick="showHelpSection('oidc-entra')">
+                <i class="fab fa-microsoft"></i> Microsoft Entra ID
+            </button>
+            <button class="help-nav-btn" onclick="showHelpSection('oidc-generic')">
+                <i class="fas fa-globe"></i> Generic OIDC
+            </button>
+            <button class="help-nav-btn" onclick="showHelpSection('api-usage')">
+                <i class="fas fa-code"></i> API Usage
+            </button>
+        </div>
+    </div>
+
+    <!-- Microsoft Entra ID Guide -->
+    <div id="help-oidc-entra" class="help-section-content">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title"><i class="fab fa-microsoft"></i> Microsoft Entra ID (Azure AD) Setup</h3>
+            </div>
+            <div class="help-body">
+                <div class="help-step">
+                    <h4>1. Create App Registration</h4>
+                    <ol>
+                        <li>Go to <a href="https://portal.azure.com" target="_blank">Azure Portal</a> → <strong>Microsoft Entra ID</strong></li>
+                        <li>Navigate to <strong>App registrations</strong> → <strong>New registration</strong></li>
+                        <li>Enter a name (e.g., "Whisper Transcription")</li>
+                        <li>Select <strong>Accounts in this organizational directory only</strong> (or multi-tenant if needed)</li>
+                        <li>Under <strong>Redirect URI</strong>:
+                            <ul>
+                                <li>Select <strong>Web</strong> as platform</li>
+                                <li>Enter: <code id="help-callback-url"></code></li>
+                            </ul>
+                        </li>
+                        <li>Click <strong>Register</strong></li>
+                    </ol>
+                </div>
+
+                <div class="help-step">
+                    <h4>2. Configure Authentication</h4>
+                    <ol>
+                        <li>In your app registration, go to <strong>Authentication</strong></li>
+                        <li>Under <strong>Platform configurations</strong>, verify the redirect URI is correct</li>
+                        <li>Scroll down to <strong>Advanced settings</strong></li>
+                        <li>Set <strong>Allow public client flows</strong> to <strong>Yes</strong> (enables PKCE without secret)</li>
+                        <li>Click <strong>Save</strong></li>
+                    </ol>
+                </div>
+
+                <div class="help-step">
+                    <h4>3. API Permissions</h4>
+                    <ol>
+                        <li>Go to <strong>API permissions</strong></li>
+                        <li>Click <strong>Add a permission</strong> → <strong>Microsoft Graph</strong> → <strong>Delegated permissions</strong></li>
+                        <li>Add these permissions:
+                            <ul>
+                                <li><code>openid</code> (usually pre-added)</li>
+                                <li><code>profile</code></li>
+                                <li><code>email</code></li>
+                            </ul>
+                        </li>
+                        <li>Click <strong>Grant admin consent</strong> (if you have admin rights)</li>
+                    </ol>
+                </div>
+
+                <div class="help-step">
+                    <h4>4. Copy Configuration Values</h4>
+                    <p>Go to <strong>Overview</strong> and copy these values to the Settings tab:</p>
+                    <table class="help-table">
+                        <tr>
+                            <th>Azure Portal Field</th>
+                            <th>Settings Field</th>
+                        </tr>
+                        <tr>
+                            <td>Application (client) ID</td>
+                            <td><strong>OIDC Client ID</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Directory (tenant) ID</td>
+                            <td>Use in Discovery URL (see below)</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="help-step">
+                    <h4>5. Discovery URL Format</h4>
+                    <p>Replace <code>{tenant-id}</code> with your Directory (tenant) ID:</p>
+                    <div class="code-block">https://login.microsoftonline.com/{tenant-id}/v2.0/.well-known/openid-configuration</div>
+                    <p class="note">Example: <code>https://login.microsoftonline.com/12345678-1234-1234-1234-123456789abc/v2.0/.well-known/openid-configuration</code></p>
+                </div>
+
+                <div class="help-step">
+                    <h4>6. Optional: Client Secret</h4>
+                    <p>A client secret is <strong>not required</strong> if you enabled public client flows (Step 2). This app uses PKCE for security.</p>
+                    <p>If you prefer using a secret:</p>
+                    <ol>
+                        <li>Go to <strong>Certificates & secrets</strong></li>
+                        <li>Click <strong>New client secret</strong></li>
+                        <li>Copy the <strong>Value</strong> (not the Secret ID!) immediately</li>
+                        <li>Paste it in the <strong>OIDC Client Secret</strong> field</li>
+                    </ol>
+                </div>
+
+                <div class="alert alert-info">
+                    <i class="fas fa-lightbulb"></i>
+                    <strong>Tip:</strong> Test your Discovery URL by opening it in a browser. You should see a JSON response with endpoints.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generic OIDC Guide -->
+    <div id="help-oidc-generic" class="help-section-content" style="display: none;">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-globe"></i> Generic OpenID Connect Setup</h3>
+            </div>
+            <div class="help-body">
+                <div class="help-step">
+                    <h4>Required Configuration</h4>
+                    <table class="help-table">
+                        <tr>
+                            <th>Field</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>Client ID</td>
+                            <td>The application/client identifier from your identity provider</td>
+                        </tr>
+                        <tr>
+                            <td>Client Secret</td>
+                            <td>Optional if your provider supports PKCE (public clients)</td>
+                        </tr>
+                        <tr>
+                            <td>Discovery URL</td>
+                            <td>The <code>.well-known/openid-configuration</code> endpoint</td>
+                        </tr>
+                        <tr>
+                            <td>Redirect URI</td>
+                            <td><code id="help-callback-url-generic"></code></td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="help-step">
+                    <h4>Common Discovery URLs</h4>
+                    <table class="help-table">
+                        <tr>
+                            <th>Provider</th>
+                            <th>Discovery URL</th>
+                        </tr>
+                        <tr>
+                            <td>Microsoft Entra ID</td>
+                            <td><code>https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration</code></td>
+                        </tr>
+                        <tr>
+                            <td>Google</td>
+                            <td><code>https://accounts.google.com/.well-known/openid-configuration</code></td>
+                        </tr>
+                        <tr>
+                            <td>Okta</td>
+                            <td><code>https://{domain}.okta.com/.well-known/openid-configuration</code></td>
+                        </tr>
+                        <tr>
+                            <td>Auth0</td>
+                            <td><code>https://{domain}.auth0.com/.well-known/openid-configuration</code></td>
+                        </tr>
+                        <tr>
+                            <td>Keycloak</td>
+                            <td><code>https://{host}/realms/{realm}/.well-known/openid-configuration</code></td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="help-step">
+                    <h4>Required Scopes</h4>
+                    <p>This application requests the following scopes:</p>
+                    <ul>
+                        <li><code>openid</code> - Required for OIDC</li>
+                        <li><code>profile</code> - User's name</li>
+                        <li><code>email</code> - User's email address</li>
+                    </ul>
+                </div>
+
+                <div class="help-step">
+                    <h4>User Claims</h4>
+                    <p>The following claims are read from the ID token:</p>
+                    <ul>
+                        <li><code>sub</code> - Unique user identifier (required)</li>
+                        <li><code>email</code> or <code>preferred_username</code> or <code>upn</code> - User's email</li>
+                        <li><code>name</code> or <code>given_name</code> - Display name</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- API Usage Guide -->
+    <div id="help-api-usage" class="help-section-content" style="display: none;">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-code"></i> API Usage</h3>
+            </div>
+            <div class="help-body">
+                <div class="help-step">
+                    <h4>OpenAI-Compatible API</h4>
+                    <p>This application provides an OpenAI-compatible transcription API at:</p>
+                    <div class="code-block" id="help-api-url"></div>
+                </div>
+
+                <div class="help-step">
+                    <h4>Example Request (cURL)</h4>
+                    <pre class="code-block">curl -X POST "<span id="help-api-url-curl"></span>" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@audio.mp3" \
+  -F "model=whisper-1"</pre>
+                </div>
+
+                <div class="help-step">
+                    <h4>Example Request (Python)</h4>
+                    <pre class="code-block">from openai import OpenAI
+
+client = OpenAI(
+    api_key="YOUR_API_KEY",
+    base_url="<span id="help-api-url-python"></span>"
+)
+
+with open("audio.mp3", "rb") as audio_file:
+    transcript = client.audio.transcriptions.create(
+        model="whisper-1",
+        file=audio_file
+    )
+    print(transcript.text)</pre>
+                </div>
+
+                <div class="help-step">
+                    <h4>Supported Parameters</h4>
+                    <table class="help-table">
+                        <tr>
+                            <th>Parameter</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td><code>file</code></td>
+                            <td>Audio file (mp3, wav, m4a, etc.)</td>
+                        </tr>
+                        <tr>
+                            <td><code>model</code></td>
+                            <td>Model name (whisper-1 for cloud, or tiny/base/small/medium/large for local)</td>
+                        </tr>
+                        <tr>
+                            <td><code>language</code></td>
+                            <td>Optional language code (e.g., "en", "de")</td>
+                        </tr>
+                        <tr>
+                            <td><code>response_format</code></td>
+                            <td>text, json, verbose_json, srt, vtt</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Create User Modal -->
+<div id="create-user-modal" class="modal-overlay hidden">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 data-i18n="admin.users.create">Create User</h3>
+            <button class="modal-close" onclick="closeModal('create-user-modal')">&times;</button>
+        </div>
+        <form id="create-user-form">
+            <div class="form-group">
+                <label for="new-user-email" data-i18n="admin.users.email">Email</label>
+                <input type="email" id="new-user-email" required>
+            </div>
+            <div class="form-group">
+                <label for="new-user-name" data-i18n="admin.users.name">Name</label>
+                <input type="text" id="new-user-name">
+            </div>
+            <div class="form-group">
+                <label for="new-user-password" data-i18n="admin.users.password">Password</label>
+                <input type="password" id="new-user-password" required minlength="8">
+            </div>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="new-user-admin">
+                    <span data-i18n="admin.users.admin">Admin</span>
+                </label>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="button secondary" onclick="closeModal('create-user-modal')" data-i18n="common.cancel">Cancel</button>
+                <button type="submit" class="button" data-i18n="common.create">Create</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Create API Key Modal -->
+<div id="create-api-key-modal" class="modal-overlay hidden">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 data-i18n="admin.api_keys.create">Create API Key</h3>
+            <button class="modal-close" onclick="closeModal('create-api-key-modal')">&times;</button>
+        </div>
+        <form id="create-api-key-form">
+            <div class="form-group">
+                <label for="new-key-name" data-i18n="admin.api_keys.name">Name</label>
+                <input type="text" id="new-key-name" required placeholder="My API Key">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="button secondary" onclick="closeModal('create-api-key-modal')" data-i18n="common.cancel">Cancel</button>
+                <button type="submit" class="button" data-i18n="common.create">Create</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Show API Key Modal -->
+<div id="show-api-key-modal" class="modal-overlay hidden">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 data-i18n="admin.api_keys.key_created">API Key Created</h3>
+            <button class="modal-close" onclick="closeModal('show-api-key-modal')">&times;</button>
+        </div>
+        <div class="alert alert-info">
+            <i class="fas fa-exclamation-triangle"></i>
+            <span data-i18n="admin.api_keys.key_warning">Copy this key now. You won't be able to see it again!</span>
+        </div>
+        <div class="api-key-display" id="new-api-key-value"></div>
+        <div class="modal-footer">
+            <button class="button" onclick="copyApiKey()">
+                <i class="fas fa-copy"></i> <span data-i18n="common.copy">Copy</span>
+            </button>
+            <button class="button secondary" onclick="closeModal('show-api-key-modal')" data-i18n="common.close">Close</button>
+        </div>
+    </div>
+</div>
+
+<style>
+    /* System Status Grid */
+    .status-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        padding: 15px;
+    }
+    .status-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 15px;
+        background: var(--bg-hover);
+        border-radius: var(--border-radius-sm);
+        border: 1px solid var(--border-color);
+    }
+    .status-label {
+        font-size: 0.9rem;
+        color: var(--text-secondary);
+    }
+    .status-value {
+        font-weight: 500;
+    }
+
+    /* Help Tab Styles */
+    .help-nav {
+        display: flex;
+        gap: 10px;
+        padding: 15px;
+        flex-wrap: wrap;
+    }
+    .help-nav-btn {
+        padding: 10px 20px;
+        border: 1px solid var(--border-color);
+        background: var(--bg-secondary);
+        cursor: pointer;
+        border-radius: 6px;
+        color: var(--text-color);
+        font-size: 0.95em;
+        transition: all 0.2s;
+    }
+    .help-nav-btn:hover {
+        border-color: var(--primary-color);
+        color: var(--primary-color);
+    }
+    .help-nav-btn.active {
+        background: var(--primary-color);
+        color: white;
+        border-color: var(--primary-color);
+    }
+    .help-nav-btn i {
+        margin-right: 8px;
+    }
+    .help-body {
+        padding: 20px;
+    }
+    .help-step {
+        margin-bottom: 30px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .help-step:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+    }
+    .help-step h4 {
+        color: var(--primary-color);
+        margin-bottom: 15px;
+        font-size: 1.1em;
+    }
+    .help-step ol, .help-step ul {
+        margin-left: 20px;
+        line-height: 1.8;
+    }
+    .help-step li {
+        margin-bottom: 8px;
+    }
+    .help-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+    }
+    .help-table th, .help-table td {
+        border: 1px solid var(--border-color);
+        padding: 8px 12px;
+        text-align: left;
+    }
+    .help-table th {
+        background: var(--bg-secondary);
+    }
+    .help-table code {
+        font-size: 0.85em;
+        word-break: break-all;
+    }
+    .code-block {
+        display: block;
+        background: var(--bg-secondary);
+        padding: 12px 15px;
+        border-radius: 4px;
+        word-break: break-all;
+        font-size: 0.9em;
+        font-family: monospace;
+        margin: 10px 0;
+        border: 1px solid var(--border-color);
+        overflow-x: auto;
+        white-space: pre-wrap;
+    }
+    .modal-body {
+        padding: 20px;
+    }
+    .help-section-content {
+        margin-top: 15px;
+    }
+    pre.code-block {
+        white-space: pre;
+        line-height: 1.5;
+    }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentSettings = {};
+
+    function openAdminTab(evt, tabId) {
+        const tabContents = document.querySelectorAll('.tab-content');
+        tabContents.forEach(tc => tc.classList.remove('active'));
+
+        const tabs = document.querySelectorAll('.tab');
+        tabs.forEach(t => t.classList.remove('active'));
+
+        document.getElementById(tabId).classList.add('active');
+        if (evt && evt.currentTarget) {
+            evt.currentTarget.classList.add('active');
+        }
+
+        // Load data for the tab
+        if (tabId === 'admin-dashboard') loadStats();
+        if (tabId === 'admin-settings') loadSettings();
+        if (tabId === 'admin-users') loadUsers();
+        if (tabId === 'admin-api-keys') loadApiKeys();
+        if (tabId === 'admin-jobs') loadAllJobs();
+        if (tabId === 'admin-help') initHelpTab();
+    }
+
+    async function loadStats() {
+        try {
+            const response = await fetch('/admin/stats');
+            const data = await response.json();
+
+            // Update system status
+            updateSystemStatus(data);
+
+            const html = `
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                    <div class="card" style="margin: 0;">
+                        <h4>${window.i18n?.t('admin.stats.total_users') || 'Total Users'}</h4>
+                        <div style="font-size: 2rem; font-weight: bold; color: var(--primary-color);">${data.users.total}</div>
+                        <div class="note">${data.users.admins} admins, ${data.users.active} active</div>
+                    </div>
+                    <div class="card" style="margin: 0;">
+                        <h4>${window.i18n?.t('admin.stats.total_jobs') || 'Total Jobs'}</h4>
+                        <div style="font-size: 2rem; font-weight: bold; color: var(--primary-color);">${data.jobs.total}</div>
+                        <div class="note">${data.jobs.completed} completed, ${data.jobs.running} running</div>
+                    </div>
+                    <div class="card" style="margin: 0;">
+                        <h4>${window.i18n?.t('admin.stats.total_api_keys') || 'API Keys'}</h4>
+                        <div style="font-size: 2rem; font-weight: bold; color: var(--primary-color);">${data.api_keys.total}</div>
+                        <div class="note">${data.api_keys.active} active</div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('stats-content').innerHTML = html;
+        } catch (e) {
+            document.getElementById('stats-content').innerHTML = '<p class="note">Failed to load statistics</p>';
+        }
+    }
+
+    function updateSystemStatus(data) {
+        // OpenAI API Key status
+        const openaiEl = document.getElementById('openai-status');
+        if (data.system?.openai_configured) {
+            openaiEl.innerHTML = '<span class="status-badge status-completed">Configured</span>';
+        } else {
+            openaiEl.innerHTML = '<span class="status-badge status-error">Not Configured</span>';
+        }
+
+        // Cloud API status
+        const cloudEl = document.getElementById('cloud-api-status');
+        if (data.system?.cloud_api_enabled) {
+            if (data.system?.openai_configured) {
+                cloudEl.innerHTML = '<span class="status-badge status-completed">Enabled</span>';
+            } else {
+                cloudEl.innerHTML = '<span class="status-badge status-cancelled">Enabled (No API Key)</span>';
+            }
+        } else {
+            cloudEl.innerHTML = '<span class="status-badge status-error">Disabled</span>';
+        }
+
+        // URL Input status
+        const urlEl = document.getElementById('url-input-status');
+        if (data.system?.url_input_enabled) {
+            urlEl.innerHTML = '<span class="status-badge status-completed">Enabled</span>';
+        } else {
+            urlEl.innerHTML = '<span class="status-badge status-error">Disabled</span>';
+        }
+
+        // Auth status
+        const authEl = document.getElementById('auth-status');
+        if (data.system?.auth_enabled) {
+            authEl.innerHTML = '<span class="status-badge status-completed">Enabled</span>';
+        } else {
+            authEl.innerHTML = '<span class="status-badge status-cancelled">Disabled</span>';
+        }
+
+        // Update cloud API warning in settings
+        const warning = document.getElementById('cloud-api-warning');
+        if (warning) {
+            if (!data.system?.openai_configured) {
+                warning.classList.remove('hidden');
+            } else {
+                warning.classList.add('hidden');
+            }
+        }
+    }
+
+    async function loadSettings() {
+        try {
+            const response = await fetch('/admin/settings');
+            const settings = await response.json();
+
+            currentSettings = {};
+            settings.forEach(s => {
+                currentSettings[s.key] = s.value;
+                const el = document.getElementById(s.key);
+                if (el) {
+                    if (el.type === 'checkbox') {
+                        el.checked = s.value === true;
+                    } else {
+                        el.value = s.value;
+                    }
+                }
+            });
+        } catch (e) {
+            console.error('Failed to load settings:', e);
+        }
+    }
+
+    async function saveSettings() {
+        const settings = {};
+        const forms = ['auth-settings-form', 'api-settings-form', 'feature-settings-form'];
+
+        forms.forEach(formId => {
+            const form = document.getElementById(formId);
+            if (!form) return;
+            const inputs = form.querySelectorAll('input, select');
+            inputs.forEach(input => {
+                if (input.type === 'checkbox') {
+                    settings[input.name] = input.checked;
+                } else if (input.type === 'number') {
+                    settings[input.name] = parseInt(input.value) || 0;
+                } else {
+                    settings[input.name] = input.value;
+                }
+            });
+        });
+
+        try {
+            const response = await fetch('/admin/settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(settings)
+            });
+
+            if (response.ok) {
+                alert('Settings saved successfully');
+                loadStats(); // Refresh status indicators
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Failed to save settings');
+            }
+        } catch (e) {
+            alert('Failed to save settings');
+        }
+    }
+
+    async function loadUsers() {
+        try {
+            const response = await fetch('/admin/users');
+            const users = await response.json();
+
+            if (!users.length) {
+                document.getElementById('users-list').innerHTML = '<p class="note">No users yet.</p>';
+                return;
+            }
+
+            const html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Email</th>
+                            <th>Name</th>
+                            <th>Source</th>
+                            <th>Admin</th>
+                            <th>Active</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${users.map(u => `
+                            <tr>
+                                <td>${u.email}</td>
+                                <td>${u.name || '-'}</td>
+                                <td><span class="badge badge-info">${u.source}</span></td>
+                                <td>${u.is_admin ? '<span class="badge badge-success">Yes</span>' : '<span class="badge">No</span>'}</td>
+                                <td>${u.is_active ? '<span class="badge badge-success">Yes</span>' : '<span class="badge badge-danger">No</span>'}</td>
+                                <td>
+                                    <button class="button sm secondary" onclick="toggleAdmin('${u.id}')">Toggle Admin</button>
+                                    <button class="button sm danger" onclick="deleteUser('${u.id}')">Delete</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            document.getElementById('users-list').innerHTML = html;
+        } catch (e) {
+            document.getElementById('users-list').innerHTML = '<p class="note">Failed to load users</p>';
+        }
+    }
+
+    async function loadApiKeys() {
+        try {
+            const response = await fetch('/admin/api-keys');
+            const keys = await response.json();
+
+            if (!keys.length) {
+                document.getElementById('api-keys-list').innerHTML = '<p class="note">No API keys created yet.</p>';
+                return;
+            }
+
+            const html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Key</th>
+                            <th>Status</th>
+                            <th>Usage</th>
+                            <th>Last Used</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${keys.map(k => `
+                            <tr>
+                                <td>${k.name}</td>
+                                <td><code>${k.key_prefix}...</code></td>
+                                <td>${k.is_enabled ? '<span class="badge badge-success">Enabled</span>' : '<span class="badge badge-danger">Disabled</span>'}</td>
+                                <td>${k.usage_count}</td>
+                                <td>${k.last_used_at ? formatDate(k.last_used_at) : 'Never'}</td>
+                                <td>
+                                    <button class="button sm secondary" onclick="toggleApiKey('${k.id}', ${!k.is_enabled})">${k.is_enabled ? 'Disable' : 'Enable'}</button>
+                                    <button class="button sm danger" onclick="deleteApiKey('${k.id}')">Delete</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            document.getElementById('api-keys-list').innerHTML = html;
+        } catch (e) {
+            document.getElementById('api-keys-list').innerHTML = '<p class="note">Failed to load API keys</p>';
+        }
+    }
+
+    async function loadAllJobs() {
+        const filter = document.getElementById('jobs-filter').value;
+        const url = filter ? `/admin/jobs?status=${filter}` : '/admin/jobs';
+
+        try {
+            const response = await fetch(url);
+            const jobs = await response.json();
+
+            if (!jobs.length) {
+                document.getElementById('all-jobs-list').innerHTML = '<p class="note">No jobs found.</p>';
+                return;
+            }
+
+            const html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>User</th>
+                            <th>Status</th>
+                            <th>Method</th>
+                            <th>Started</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${jobs.map(j => `
+                            <tr>
+                                <td><code>${j.id.substring(0, 8)}...</code></td>
+                                <td>${j.user_email}</td>
+                                <td><span class="status-${j.status}">${j.status}</span></td>
+                                <td>${j.method} / ${j.model || '-'}</td>
+                                <td>${j.started_at ? formatDate(j.started_at) : '-'}</td>
+                                <td>
+                                    ${j.status === 'running' ? `<button class="button sm secondary" onclick="cancelJob('${j.id}')">Cancel</button>` : ''}
+                                    <button class="button sm danger" onclick="deleteJob('${j.id}')">Delete</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            document.getElementById('all-jobs-list').innerHTML = html;
+        } catch (e) {
+            document.getElementById('all-jobs-list').innerHTML = '<p class="note">Failed to load jobs</p>';
+        }
+    }
+
+    function showCreateUserModal() {
+        document.getElementById('create-user-modal').classList.remove('hidden');
+    }
+
+    function showCreateApiKeyModal() {
+        document.getElementById('create-api-key-modal').classList.remove('hidden');
+    }
+
+    function closeModal(id) {
+        document.getElementById(id).classList.add('hidden');
+    }
+
+    document.getElementById('create-user-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = document.getElementById('new-user-email').value;
+        const name = document.getElementById('new-user-name').value;
+        const password = document.getElementById('new-user-password').value;
+        const isAdmin = document.getElementById('new-user-admin').checked;
+
+        try {
+            const response = await fetch('/admin/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, name, password, is_admin: isAdmin })
+            });
+
+            if (response.ok) {
+                closeModal('create-user-modal');
+                loadUsers();
+                e.target.reset();
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Failed to create user');
+            }
+        } catch (e) {
+            alert('Failed to create user');
+        }
+    });
+
+    document.getElementById('create-api-key-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('new-key-name').value;
+
+        try {
+            const response = await fetch('/admin/api-keys', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                closeModal('create-api-key-modal');
+                document.getElementById('new-api-key-value').textContent = data.key;
+                document.getElementById('show-api-key-modal').classList.remove('hidden');
+                loadApiKeys();
+                e.target.reset();
+            } else {
+                alert(data.error || 'Failed to create API key');
+            }
+        } catch (e) {
+            alert('Failed to create API key');
+        }
+    });
+
+    function copyApiKey() {
+        const key = document.getElementById('new-api-key-value').textContent;
+        navigator.clipboard.writeText(key).then(() => {
+            alert('Copied to clipboard!');
+        });
+    }
+
+    async function toggleAdmin(userId) {
+        try {
+            const response = await fetch(`/admin/users/${userId}/promote`, { method: 'POST' });
+            if (response.ok) {
+                loadUsers();
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Failed to toggle admin');
+            }
+        } catch (e) {
+            alert('Failed to toggle admin');
+        }
+    }
+
+    async function deleteUser(userId) {
+        if (!confirm('Delete this user?')) return;
+        try {
+            const response = await fetch(`/admin/users/${userId}`, { method: 'DELETE' });
+            if (response.ok) {
+                loadUsers();
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Failed to delete user');
+            }
+        } catch (e) {
+            alert('Failed to delete user');
+        }
+    }
+
+    async function toggleApiKey(keyId, enable) {
+        try {
+            const response = await fetch(`/admin/api-keys/${keyId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ is_enabled: enable })
+            });
+            if (response.ok) {
+                loadApiKeys();
+            }
+        } catch (e) {
+            alert('Failed to update API key');
+        }
+    }
+
+    async function deleteApiKey(keyId) {
+        if (!confirm('Delete this API key?')) return;
+        try {
+            const response = await fetch(`/admin/api-keys/${keyId}`, { method: 'DELETE' });
+            if (response.ok) {
+                loadApiKeys();
+            }
+        } catch (e) {
+            alert('Failed to delete API key');
+        }
+    }
+
+    async function cancelJob(jobId) {
+        try {
+            const response = await fetch(`/admin/jobs/${jobId}/cancel`, { method: 'POST' });
+            if (response.ok) {
+                loadAllJobs();
+            }
+        } catch (e) {
+            alert('Failed to cancel job');
+        }
+    }
+
+    async function deleteJob(jobId) {
+        if (!confirm('Delete this job?')) return;
+        try {
+            const response = await fetch(`/admin/jobs/${jobId}`, { method: 'DELETE' });
+            if (response.ok) {
+                loadAllJobs();
+            }
+        } catch (e) {
+            alert('Failed to delete job');
+        }
+    }
+
+    // Help Tab Functions
+    function initHelpTab() {
+        const callbackUrl = window.location.origin + '/auth/oidc/callback';
+        const apiUrl = window.location.origin + '/v1/audio/transcriptions';
+        const baseUrl = window.location.origin + '/v1';
+
+        // Set callback URLs
+        const callbackEl = document.getElementById('help-callback-url');
+        if (callbackEl) callbackEl.textContent = callbackUrl;
+
+        const callbackGenericEl = document.getElementById('help-callback-url-generic');
+        if (callbackGenericEl) callbackGenericEl.textContent = callbackUrl;
+
+        // Set API URLs
+        const apiUrlEl = document.getElementById('help-api-url');
+        if (apiUrlEl) apiUrlEl.textContent = apiUrl;
+
+        const apiUrlCurlEl = document.getElementById('help-api-url-curl');
+        if (apiUrlCurlEl) apiUrlCurlEl.textContent = apiUrl;
+
+        const apiUrlPythonEl = document.getElementById('help-api-url-python');
+        if (apiUrlPythonEl) apiUrlPythonEl.textContent = baseUrl;
+    }
+
+    function showHelpSection(section) {
+        // Hide all help sections
+        document.querySelectorAll('.help-section-content').forEach(el => {
+            el.style.display = 'none';
+        });
+
+        // Remove active from all nav buttons
+        document.querySelectorAll('.help-nav-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+
+        // Show selected section
+        const sectionEl = document.getElementById('help-' + section);
+        if (sectionEl) sectionEl.style.display = 'block';
+
+        // Mark clicked button as active
+        event.target.classList.add('active');
+    }
+
+    // Load initial data
+    document.addEventListener('DOMContentLoaded', () => {
+        loadStats();
+    });
+</script>
+{% endblock %}

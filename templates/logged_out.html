@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logged Out - Whisper Transcription</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/app.js"></script>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-card" style="text-align: center;">
+            <div style="margin-bottom: 20px;">
+                <img src="/static/favicon.svg" alt="Logo" style="width: 64px; height: 64px;">
+            </div>
+
+            <div style="margin-bottom: 30px;">
+                <i class="fas fa-check-circle" style="font-size: 48px; color: var(--success-color, #22c55e);"></i>
+            </div>
+
+            <h2 data-i18n="auth.logged_out">Successfully Logged Out</h2>
+
+            <p style="color: var(--muted-color); margin-bottom: 30px;" data-i18n="auth.logged_out_message">
+                You have been successfully logged out.
+            </p>
+
+            <a href="/" class="button" style="width: 100%;">
+                <i class="fas fa-home"></i>
+                <span data-i18n="auth.back_to_home">Back to Home</span>
+            </a>
+        </div>
+
+        <div style="text-align: center; margin-top: 20px;">
+            <div class="theme-toggle" style="display: inline-flex;">
+                <button data-theme="light" title="Light mode">
+                    <i class="fas fa-sun"></i>
+                </button>
+                <button data-theme="dark" title="Dark mode">
+                    <i class="fas fa-moon"></i>
+                </button>
+                <button data-theme="auto" title="Auto (system)">
+                    <i class="fas fa-circle-half-stroke"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Whisper Transcription</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/app.js"></script>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-card">
+            <div style="text-align: center; margin-bottom: 20px;">
+                <img src="/static/favicon.svg" alt="Logo" style="width: 48px; height: 48px;">
+            </div>
+            <h2 data-i18n="auth.login">Login</h2>
+
+            {% if error %}
+            <div class="alert alert-error">
+                <i class="fas fa-exclamation-circle"></i>
+                {{ error }}
+            </div>
+            {% endif %}
+
+            <form id="login-form" action="/auth/login" method="POST">
+                <div class="form-group">
+                    <label for="email" data-i18n="auth.email">Email</label>
+                    <input type="email" id="email" name="email" required autofocus>
+                </div>
+
+                <div class="form-group">
+                    <label for="password" data-i18n="auth.password">Password</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+
+                <button type="submit" class="button" style="width: 100%;">
+                    <i class="fas fa-sign-in-alt"></i>
+                    <span data-i18n="auth.login_button">Sign In</span>
+                </button>
+            </form>
+
+            {% if methods and methods|length > 1 %}
+            <div class="login-divider" data-i18n="auth.or">or</div>
+
+            <div class="login-methods">
+                {% for method in methods %}
+                    {% if method.type == 'oidc' %}
+                    <a href="/auth/oidc/authorize" class="button outline" style="width: 100%;">
+                        <i class="fas fa-key"></i>
+                        <span data-i18n="auth.login_with_oidc">Sign in with OpenID Connect</span>
+                    </a>
+                    {% elif method.type == 'http-header' %}
+                    <div class="note" style="text-align: center;">
+                        <i class="fas fa-info-circle"></i>
+                        <span>HTTP Header authentication is configured. Access through your proxy to authenticate automatically.</span>
+                    </div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+
+        <div style="text-align: center; margin-top: 20px;">
+            <div class="theme-toggle" style="display: inline-flex;">
+                <button data-theme="light" title="Light mode">
+                    <i class="fas fa-sun"></i>
+                </button>
+                <button data-theme="dark" title="Dark mode">
+                    <i class="fas fa-moon"></i>
+                </button>
+                <button data-theme="auto" title="Auto (system)">
+                    <i class="fas fa-circle-half-stroke"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const formData = new FormData(form);
+
+            try {
+                const response = await fetch('/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: formData.get('email'),
+                        password: formData.get('password')
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    window.location.href = '/';
+                } else {
+                    alert(data.error || 'Login failed');
+                }
+            } catch (error) {
+                // Fallback to regular form submission
+                form.submit();
+            }
+        });
+    </script>
+</body>
+</html>

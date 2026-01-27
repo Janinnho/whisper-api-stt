@@ -1,34 +1,43 @@
-FROM python:3.9-slim
+FROM python:3.11-slim
 
-# Install ffmpeg and more
-RUN apt-get update && apt-get install -y ffmpeg
+# Install ffmpeg and runtime deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	ffmpeg \
+	build-essential \
+	git \
+	&& rm -rf /var/lib/apt/lists/*
 
-# Setze Umgebungsvariablen
+# Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-# OPENAI_API_KEY kann beim Build mit --build-arg OPENAI_API_KEY=your_key übergeben werden
+
+# OPENAI_API_KEY is the only required environment variable
+# Can be passed at runtime with -e OPENAI_API_KEY=your_key
 ARG OPENAI_API_KEY=""
 ENV OPENAI_API_KEY=${OPENAI_API_KEY}
-# LOCAL_API_KEY für API-Endpunkt kann mit --build-arg oder -e LOCAL_API_KEY übergeben werden
-ARG LOCAL_API_KEY=""
-ENV LOCAL_API_KEY=${LOCAL_API_KEY}
 
-# Arbeitsverzeichnis festlegen
+# Database path (mounted volume suggested)
+ENV DB_PATH=/data/app.db
+
+# Working directory
 WORKDIR /app
 
-# Kopiere die requirements.txt und installiere Abhängigkeiten
+# Copy requirements and install dependencies
 COPY requirements.txt /app/
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
-# Kopiere den Rest der Dateien
+# Copy rest of the files
 COPY . /app/
 
-# Setze die Flask-App-Variable
+# Set Flask app variable
 ENV FLASK_APP=app.py
 
-# Exponiere den Port
-EXPOSE 5000
+# Expose port 5001
+EXPOSE 5001
 
-# Starte die Flask-App
-CMD ["flask", "run", "--host=0.0.0.0"]
+# Create volume mountpoint for DB persistence
+VOLUME ["/data"]
+
+# Start the app with gunicorn on port 5001
+CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:5001", "app:app"]
