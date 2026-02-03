@@ -20,7 +20,7 @@
         </a>
 
         <div class="navbar-controls">
-            {% if user and user.is_admin %}
+            {% if (not auth_enabled) or is_admin %}
             <a href="/admin" class="button secondary sm" title="Admin Panel">
                 <i class="fas fa-cog"></i>
                 <span data-i18n="nav.admin">Admin</span>

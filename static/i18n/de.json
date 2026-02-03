@@ -18,7 +18,7 @@
     "url_note": "Geben Sie entweder eine Audiodatei oder eine Medien-URL an. URLs von YouTube und Twitch werden unterstützt.",
     "method": "Transkriptionsmethode",
     "local_model": "Lokales Whisper-Modell",
-    "cloud_api": "OpenAI Cloud API",
+    "cloud_api": "Cloud-API",
     "model_size": "Lokale Modellgröße",
     "cloud_model": "Cloud-Modell",
     "upload_file": "Audiodatei hochladen",
@@ -122,9 +122,9 @@
       "title": "Funktionseinstellungen",
       "url_input": "URL-Eingabe aktivieren (YouTube/Twitch)",
       "url_input_desc": "Erlaubt Benutzern, von YouTube- und Twitch-URLs zu transkribieren",
-      "cloud_api": "Cloud-API aktivieren (OpenAI)",
-      "cloud_api_desc": "Erlaubt Benutzern, OpenAIs Cloud-Transkriptions-API zu verwenden",
-      "no_api_key": "OpenAI-API-Schlüssel ist nicht konfiguriert. Cloud-API funktioniert nicht."
+      "cloud_api": "Cloud-API aktivieren (Externer Anbieter)",
+      "cloud_api_desc": "Erlaubt Benutzern, einen konfigurierten Cloud-Transkriptionsanbieter zu verwenden",
+      "no_api_key": "Cloud-Anbieter ist nicht konfiguriert. Die Cloud-API funktioniert nicht."
     },
     "api_settings": {
       "title": "API-Einstellungen",

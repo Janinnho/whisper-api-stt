@@ -34,7 +34,7 @@
                     <select name="transcription_method" id="transcription-method" onchange="updateModelOptions()">
                         <option value="local" {% if selected_method == 'local' %}selected{% endif %} data-i18n="transcribe.local_model">Local Whisper Model</option>
                         {% if cloud_available %}
-                        <option value="cloud" {% if selected_method == 'cloud' %}selected{% endif %} data-i18n="transcribe.cloud_api">OpenAI Cloud API</option>
+                        <option value="cloud" {% if selected_method == 'cloud' %}selected{% endif %} data-i18n="transcribe.cloud_api">Cloud API</option>
                         {% endif %}
                     </select>
                 </div>
