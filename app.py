@@ -29,7 +29,8 @@ from models import (
 )
 from config import (
     get_setting, set_setting, SettingsManager,
-    is_auth_enabled, is_setup_completed
+    is_auth_enabled, is_setup_completed,
+    get_cloud_provider_config, is_cloud_provider_configured, get_cloud_provider_label
 )
 from auth import auth_bp, validate_api_key, login_required, admin_required
 from admin import admin_bp
@@ -42,11 +43,7 @@ CORS(app)
 app.register_blueprint(auth_bp)
 app.register_blueprint(admin_bp)
 
-# Environment variables (only OPENAI_API_KEY remains as env var)
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-if not OPENAI_API_KEY:
-    print("Note: No OPENAI_API_KEY found. Cloud transcription will not be available.")
+# Cloud provider configuration is stored in the database with env var fallback for OpenAI.
 
 # Load local Whisper model (will be downloaded on first call)
 local_model = None
@@ -300,6 +297,9 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
     max_cloud_file_mb = get_setting('max_cloud_file_mb', 20)
     chunk_duration = get_setting('chunk_duration_seconds', 600)
     reencode_bitrate = get_setting('reencode_bitrate', '64k')
+    cloud_config = get_cloud_provider_config()
+    provider = cloud_config.get("provider") or "openai"
+    provider_label = get_cloud_provider_label(provider)
 
     file_size_bytes = os.path.getsize(input_path)
     size_mb = file_size_bytes / (1024 * 1024)
@@ -307,7 +307,7 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
     def _send_to_openai(file_path: str, override_content_type: str = None, want_verbose: bool = False) -> dict:
         ct = override_content_type or (mimetypes.guess_type(file_path)[0] or "application/octet-stream")
         if progress:
-            progress(f"Sending to OpenAI: {os.path.basename(file_path)}", 0)
+            progress(f"Sending to {provider_label}: {os.path.basename(file_path)}", 0)
         data_fields = [("model", model)]
         if is_diarize:
             # For diarization, we need logprobs to extract speaker info
@@ -318,10 +318,12 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
             if model.startswith("gpt-4o"):
                 data_fields.append(("timestamp_granularities[]", "segment"))
                 data_fields.append(("timestamp_granularities[]", "word"))
+        url, headers, params = _get_cloud_request_details()
         with open(file_path, "rb") as f:
             response = requests.post(
-                "https://api.openai.com/v1/audio/transcriptions",
-                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                url,
+                headers=headers,
+                params=params,
                 files={"file": (os.path.basename(file_path), f, ct)},
                 data=data_fields
             )
@@ -333,8 +335,9 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
         if want_verbose or is_diarize:
             with open(file_path, "rb") as f2:
                 resp2 = requests.post(
-                    "https://api.openai.com/v1/audio/transcriptions",
-                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                    url,
+                    headers=headers,
+                    params=params,
                     files={"file": (os.path.basename(file_path), f2, ct)},
                     data=[("model", model)]
                 )
@@ -342,6 +345,42 @@ def transcribe_with_openai_api_path(input_path: str, model="whisper-1", progress
                 return {"text": resp2.json().get("text", "")}
             return {"__error__": f"{resp2.status_code}: {resp2.text}"}
         return {"__error__": f"{response.status_code}: {response.text}"}
+
+    def _get_cloud_request_details():
+        if not is_cloud_provider_configured():
+            raise RuntimeError("No cloud provider configured.")
+        def _join_transcriptions_url(base_url: str) -> str:
+            trimmed = (base_url or "").rstrip("/")
+            if trimmed.endswith("/v1"):
+                return trimmed + "/audio/transcriptions"
+            return trimmed + "/v1/audio/transcriptions"
+        if provider == "openai":
+            api_key = cloud_config.get("api_key") or ""
+            base_url = cloud_config.get("base_url") or "https://api.openai.com"
+            url = _join_transcriptions_url(base_url)
+            return url, {"Authorization": f"Bearer {api_key}"}, None
+        if provider == "openai_compatible":
+            api_key = cloud_config.get("api_key") or ""
+            base_url = cloud_config.get("base_url") or ""
+            url = _join_transcriptions_url(base_url)
+            auth_header = (cloud_config.get("auth_header") or "authorization_bearer").lower()
+            headers = {}
+            if auth_header == "api-key":
+                headers["api-key"] = api_key
+            elif auth_header == "x-api-key":
+                headers["x-api-key"] = api_key
+            else:
+                headers["Authorization"] = f"Bearer {api_key}"
+            return url, headers, None
+        if provider == "azure_openai":
+            api_key = cloud_config.get("api_key") or ""
+            endpoint = cloud_config.get("endpoint") or ""
+            deployment = cloud_config.get("deployment") or ""
+            api_version = cloud_config.get("api_version") or ""
+            url = endpoint.rstrip("/") + f"/openai/deployments/{deployment}/audio/transcriptions"
+            params = {"api-version": api_version} if api_version else None
+            return url, {"api-key": api_key}, params
+        raise RuntimeError(f"Unsupported cloud provider: {provider}")
 
     def _extract_segments(api_resp: dict):
         if not isinstance(api_resp, dict):
@@ -749,13 +788,21 @@ def _is_current_user_admin() -> bool:
     return bool(u and u.is_admin)
 
 
+@app.context_processor
+def _inject_global_template_vars():
+    return {
+        "auth_enabled": is_auth_enabled(),
+        "is_admin": _is_current_user_admin()
+    }
+
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     transcription = None
     transcription_method = "local"
     local_model_size = "base"
     cloud_model = "whisper-1"
-    cloud_available = OPENAI_API_KEY is not None
+    cloud_available = is_cloud_provider_configured()
 
     if request.method == "POST":
         transcription_method = request.form.get("transcription_method", "local")
@@ -801,8 +848,8 @@ def index():
                     if transcription_method == "local":
                         result = transcribe_local_from_path(input_path, local_model_size, return_segments=False)
                     else:
-                        if not OPENAI_API_KEY:
-                            transcription = "Error: No API key configured for cloud transcription!"
+                        if not is_cloud_provider_configured():
+                            transcription = "Error: No cloud provider configured for transcription!"
                         else:
                             result = transcribe_with_openai_api_path(input_path, cloud_model, return_segments=False)
                     transcription = result if isinstance(result, str) else result.get("text", "")
@@ -855,8 +902,8 @@ def transcribe_ajax():
             if transcription_method == "local":
                 result = transcribe_local_from_path(input_path, local_model_size, return_segments=with_timestamps)
             else:
-                if not OPENAI_API_KEY:
-                    return jsonify({"error": "Error: No API key configured for cloud transcription!"}), 400
+                if not is_cloud_provider_configured():
+                    return jsonify({"error": "Error: No cloud provider configured for transcription!"}), 400
                 if cloud_model.startswith("gpt-4o"):
                     with_timestamps = False
                 result = transcribe_with_openai_api_path(input_path, cloud_model, return_segments=with_timestamps)
@@ -935,8 +982,8 @@ def transcribe_start():
             if transcription_method == "local":
                 text = transcribe_local_from_path(local_input, local_model_size, mapped_progress, return_segments=with_timestamps, cancel_check=cancel_check)
             else:
-                if not OPENAI_API_KEY:
-                    raise RuntimeError("No API key configured for cloud transcription!")
+                if not is_cloud_provider_configured():
+                    raise RuntimeError("No cloud provider configured for transcription!")
                 want_segments = with_timestamps and not cloud_model.startswith("gpt-4o")
                 text = transcribe_with_openai_api_path(local_input, cloud_model, mapped_progress, return_segments=want_segments, cancel_check=cancel_check)
             if isinstance(text, str) and text.strip().lower() == "cancelled":

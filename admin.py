@@ -3,7 +3,6 @@ Admin blueprint for Whisper API STT application.
 Handles admin console, settings, user management, and API key management.
 """
 import json
-import os
 import secrets
 from datetime import datetime
 from typing import Optional
@@ -11,7 +10,10 @@ from typing import Optional
 from flask import Blueprint, request, redirect, url_for, render_template, jsonify, g
 
 from models import User, ApiKey, TranscriptionJob, SessionLocal, generate_uuid
-from config import get_setting, set_setting, SettingsManager, is_auth_enabled, is_setup_completed
+from config import (
+    get_setting, set_setting, SettingsManager, is_auth_enabled, is_setup_completed,
+    get_cloud_provider_config, is_cloud_provider_configured, get_cloud_provider_label
+)
 from auth import (
     admin_required, login_required, hash_password, verify_password,
     generate_api_key, get_api_key_prefix, hash_token, create_user
@@ -479,6 +481,9 @@ def get_stats():
     """Get system statistics."""
     db_session = SessionLocal()
     try:
+        cloud_cfg = get_cloud_provider_config()
+        cloud_provider = cloud_cfg.get("provider") or "openai"
+        cloud_provider_label = get_cloud_provider_label(cloud_provider)
         user_count = db_session.query(User).count()
         admin_count = db_session.query(User).filter(User.is_admin == True).count()
         active_user_count = db_session.query(User).filter(User.is_active == True).count()
@@ -508,7 +513,9 @@ def get_stats():
                 'active': active_api_keys
             },
             'system': {
-                'openai_configured': bool(os.getenv('OPENAI_API_KEY')),
+                'cloud_provider': cloud_provider,
+                'cloud_provider_label': cloud_provider_label,
+                'cloud_provider_configured': is_cloud_provider_configured(),
                 'cloud_api_enabled': get_setting('feature_cloud_api_enabled', True),
                 'url_input_enabled': get_setting('feature_url_input_enabled', True),
                 'auth_enabled': is_auth_enabled()

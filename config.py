@@ -30,6 +30,18 @@ DEFAULT_SETTINGS = {
     "reencode_bitrate": {"value": "64k", "type": "string", "category": "api"},
     "job_timeout_seconds": {"value": "43200", "type": "integer", "category": "api"},
 
+    # Cloud provider settings
+    "cloud_provider": {"value": "openai", "type": "string", "category": "api"},
+    "openai_api_key": {"value": "", "type": "string", "category": "api"},
+    "openai_base_url": {"value": "https://api.openai.com", "type": "string", "category": "api"},
+    "compatible_api_key": {"value": "", "type": "string", "category": "api"},
+    "compatible_base_url": {"value": "", "type": "string", "category": "api"},
+    "compatible_auth_header": {"value": "authorization_bearer", "type": "string", "category": "api"},
+    "azure_openai_api_key": {"value": "", "type": "string", "category": "api"},
+    "azure_openai_endpoint": {"value": "", "type": "string", "category": "api"},
+    "azure_openai_deployment": {"value": "", "type": "string", "category": "api"},
+    "azure_openai_api_version": {"value": "", "type": "string", "category": "api"},
+
     # Feature settings
     "feature_url_input_enabled": {"value": "true", "type": "boolean", "category": "features"},
     "feature_cloud_api_enabled": {"value": "true", "type": "boolean", "category": "features"},
@@ -238,3 +250,64 @@ def get_auth_config() -> dict:
 def get_api_config() -> dict:
     """Get all API-related settings."""
     return SettingsManager.get_all("api")
+
+
+def get_cloud_provider_config() -> dict:
+    """Get cloud provider configuration."""
+    provider = SettingsManager.get("cloud_provider", "openai") or "openai"
+
+    if provider == "openai":
+        api_key = SettingsManager.get("openai_api_key", "") or os.getenv("OPENAI_API_KEY", "")
+        base_url = SettingsManager.get("openai_base_url", "https://api.openai.com")
+        return {
+            "provider": "openai",
+            "api_key": api_key or "",
+            "base_url": base_url or "https://api.openai.com",
+        }
+
+    if provider == "openai_compatible":
+        return {
+            "provider": "openai_compatible",
+            "api_key": SettingsManager.get("compatible_api_key", "") or "",
+            "base_url": SettingsManager.get("compatible_base_url", "") or "",
+            "auth_header": SettingsManager.get("compatible_auth_header", "authorization_bearer") or "authorization_bearer",
+        }
+
+    if provider == "azure_openai":
+        return {
+            "provider": "azure_openai",
+            "api_key": SettingsManager.get("azure_openai_api_key", "") or "",
+            "endpoint": SettingsManager.get("azure_openai_endpoint", "") or "",
+            "deployment": SettingsManager.get("azure_openai_deployment", "") or "",
+            "api_version": SettingsManager.get("azure_openai_api_version", "") or "",
+        }
+
+    return {"provider": provider}
+
+
+def is_cloud_provider_configured() -> bool:
+    """Check if the configured cloud provider has required settings."""
+    cfg = get_cloud_provider_config()
+    provider = cfg.get("provider")
+
+    if provider == "openai":
+        return bool(cfg.get("api_key"))
+
+    if provider == "openai_compatible":
+        return bool(cfg.get("api_key") and cfg.get("base_url"))
+
+    if provider == "azure_openai":
+        return bool(cfg.get("api_key") and cfg.get("endpoint") and cfg.get("deployment") and cfg.get("api_version"))
+
+    return False
+
+
+def get_cloud_provider_label(provider: str) -> str:
+    """Get a user-friendly provider label."""
+    if provider == "openai":
+        return "OpenAI"
+    if provider == "openai_compatible":
+        return "OpenAI-Compatible"
+    if provider == "azure_openai":
+        return "Azure OpenAI / Foundry"
+    return provider or "Unknown"

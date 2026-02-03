@@ -36,8 +36,8 @@
         </div>
         <div id="system-status" class="status-grid">
             <div class="status-item">
-                <span class="status-label">OpenAI API Key</span>
-                <span id="openai-status" class="status-value">
+                <span class="status-label">Cloud Provider</span>
+                <span id="cloud-provider-status" class="status-value">
                     <i class="fas fa-circle-notch fa-spin"></i>
                 </span>
             </div>
@@ -132,6 +132,73 @@
 
     <div class="card">
         <div class="card-header">
+            <h3 class="card-title">Cloud Provider Settings</h3>
+        </div>
+        <form id="cloud-provider-settings-form" class="settings-form">
+            <div class="form-group">
+                <label for="cloud_provider">Cloud Provider</label>
+                <select id="cloud_provider" name="cloud_provider" onchange="updateCloudProviderFields()">
+                    <option value="openai">OpenAI</option>
+                    <option value="azure_openai">Azure OpenAI / Foundry</option>
+                    <option value="openai_compatible">OpenAI-Compatible</option>
+                </select>
+            </div>
+
+            <div id="provider-openai-fields">
+                <div class="form-group">
+                    <label for="openai_api_key">OpenAI API Key</label>
+                    <input type="password" id="openai_api_key" name="openai_api_key" placeholder="sk-...">
+                </div>
+                <div class="form-group">
+                    <label for="openai_base_url">OpenAI Base URL (optional)</label>
+                    <input type="url" id="openai_base_url" name="openai_base_url" placeholder="https://api.openai.com">
+                </div>
+            </div>
+
+            <div id="provider-azure-fields" style="display: none;">
+                <div class="form-group">
+                    <label for="azure_openai_endpoint">Azure OpenAI Endpoint</label>
+                    <input type="url" id="azure_openai_endpoint" name="azure_openai_endpoint" placeholder="https://your-resource.openai.azure.com">
+                </div>
+                <div class="form-group">
+                    <label for="azure_openai_deployment">Deployment Name</label>
+                    <input type="text" id="azure_openai_deployment" name="azure_openai_deployment">
+                </div>
+                <div class="form-group">
+                    <label for="azure_openai_api_version">API Version</label>
+                    <input type="text" id="azure_openai_api_version" name="azure_openai_api_version" placeholder="2024-xx-xx">
+                    <small class="note">Use the API version supported by your Azure OpenAI deployment</small>
+                </div>
+                <div class="form-group">
+                    <label for="azure_openai_api_key">Azure OpenAI API Key</label>
+                    <input type="password" id="azure_openai_api_key" name="azure_openai_api_key">
+                </div>
+            </div>
+
+            <div id="provider-compatible-fields" style="display: none;">
+                <div class="form-group">
+                    <label for="compatible_base_url">Compatible Base URL</label>
+                    <input type="url" id="compatible_base_url" name="compatible_base_url" placeholder="https://provider.example.com">
+                    <small class="note">You can use a base URL with or without <code>/v1</code></small>
+                </div>
+                <div class="form-group">
+                    <label for="compatible_api_key">API Key</label>
+                    <input type="password" id="compatible_api_key" name="compatible_api_key">
+                </div>
+                <div class="form-group">
+                    <label for="compatible_auth_header">Auth Header</label>
+                    <select id="compatible_auth_header" name="compatible_auth_header">
+                        <option value="authorization_bearer">Authorization: Bearer</option>
+                        <option value="api-key">api-key</option>
+                        <option value="x-api-key">x-api-key</option>
+                    </select>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
             <h3 class="card-title"><i class="fas fa-toggle-on"></i> <span data-i18n="admin.feature_settings.title">Feature Settings</span></h3>
         </div>
         <form id="feature-settings-form" class="settings-form">
@@ -141,13 +208,13 @@
                 <small class="note" data-i18n="admin.feature_settings.url_input_desc">Allow users to transcribe from YouTube and Twitch URLs</small>
             </div>
             <div class="form-group">
-                <label data-i18n="admin.feature_settings.cloud_api">Enable Cloud API (OpenAI)</label>
+                <label data-i18n="admin.feature_settings.cloud_api">Enable Cloud API (External Provider)</label>
                 <input type="checkbox" id="feature_cloud_api_enabled" name="feature_cloud_api_enabled">
-                <small class="note" data-i18n="admin.feature_settings.cloud_api_desc">Allow users to use OpenAI's cloud transcription API</small>
+                <small class="note" data-i18n="admin.feature_settings.cloud_api_desc">Allow users to use a configured cloud transcription provider</small>
             </div>
             <div id="cloud-api-warning" class="alert alert-warning hidden">
                 <i class="fas fa-exclamation-triangle"></i>
-                <span data-i18n="admin.feature_settings.no_api_key">OpenAI API key is not configured. Cloud API will not work.</span>
+                <span data-i18n="admin.feature_settings.no_api_key">Cloud provider is not configured. Cloud API will not work.</span>
             </div>
         </form>
     </div>
@@ -791,21 +858,24 @@ with open("audio.mp3", "rb") as audio_file:
     }
 
     function updateSystemStatus(data) {
-        // OpenAI API Key status
-        const openaiEl = document.getElementById('openai-status');
-        if (data.system?.openai_configured) {
-            openaiEl.innerHTML = '<span class="status-badge status-completed">Configured</span>';
-        } else {
-            openaiEl.innerHTML = '<span class="status-badge status-error">Not Configured</span>';
+        const providerLabel = data.system?.cloud_provider_label || 'Cloud Provider';
+        const providerConfigured = !!data.system?.cloud_provider_configured;
+        const providerEl = document.getElementById('cloud-provider-status');
+        if (providerEl) {
+            if (providerConfigured) {
+                providerEl.innerHTML = `<span class="status-badge status-completed">${providerLabel}</span>`;
+            } else {
+                providerEl.innerHTML = `<span class="status-badge status-error">${providerLabel} (Not Configured)</span>`;
+            }
         }
 
         // Cloud API status
         const cloudEl = document.getElementById('cloud-api-status');
         if (data.system?.cloud_api_enabled) {
-            if (data.system?.openai_configured) {
+            if (providerConfigured) {
                 cloudEl.innerHTML = '<span class="status-badge status-completed">Enabled</span>';
             } else {
-                cloudEl.innerHTML = '<span class="status-badge status-cancelled">Enabled (No API Key)</span>';
+                cloudEl.innerHTML = '<span class="status-badge status-cancelled">Enabled (Not Configured)</span>';
             }
         } else {
             cloudEl.innerHTML = '<span class="status-badge status-error">Disabled</span>';
@@ -830,12 +900,23 @@ with open("audio.mp3", "rb") as audio_file:
         // Update cloud API warning in settings
         const warning = document.getElementById('cloud-api-warning');
         if (warning) {
-            if (!data.system?.openai_configured) {
+            if (!providerConfigured) {
                 warning.classList.remove('hidden');
             } else {
                 warning.classList.add('hidden');
             }
         }
+    }
+
+    function updateCloudProviderFields() {
+        const provider = document.getElementById('cloud_provider')?.value || 'openai';
+        const openaiFields = document.getElementById('provider-openai-fields');
+        const azureFields = document.getElementById('provider-azure-fields');
+        const compatibleFields = document.getElementById('provider-compatible-fields');
+
+        if (openaiFields) openaiFields.style.display = provider === 'openai' ? 'block' : 'none';
+        if (azureFields) azureFields.style.display = provider === 'azure_openai' ? 'block' : 'none';
+        if (compatibleFields) compatibleFields.style.display = provider === 'openai_compatible' ? 'block' : 'none';
     }
 
     async function loadSettings() {
@@ -855,6 +936,7 @@ with open("audio.mp3", "rb") as audio_file:
                     }
                 }
             });
+            updateCloudProviderFields();
         } catch (e) {
             console.error('Failed to load settings:', e);
         }
@@ -862,7 +944,7 @@ with open("audio.mp3", "rb") as audio_file:
 
     async function saveSettings() {
         const settings = {};
-        const forms = ['auth-settings-form', 'api-settings-form', 'feature-settings-form'];
+        const forms = ['auth-settings-form', 'cloud-provider-settings-form', 'api-settings-form', 'feature-settings-form'];
 
         forms.forEach(formId => {
             const form = document.getElementById(formId);
